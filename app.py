@@ -53,7 +53,7 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
 # Stripe (opcjonalne)
-ENABLE_STRIPE = os.getenv("ENABLE_STRIPE", "false").lower() in ("1", "true", "yes", "y", "on")
+ENABLE_STRIPE = os.getenv("ENABLE_STRIPE", "true").lower() in ("1", "true", "yes", "y", "on")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_MONTHLY = os.getenv("STRIPE_PRICE_ID_MONTHLY", "")  # price_...
