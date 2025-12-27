@@ -1,0 +1,72 @@
+{
+  "companies": {
+    "cmp_Makdioc4uZY": {
+      "id": "cmp_Makdioc4uZY",
+      "name": "ARCHITEKTONICZNE STUDIO HUBERT STENZEL",
+      "email": "hubertstenzel@gmail.com",
+      "password_hash": "Ez7afFHRvlGM0PSh05ADVw==$gHGezeUVGsaecg7jrgzSV6Ljusl9GczpALc0LIinVCw=",
+      "created_at": 1766505017,
+      "pricing_text": "1. Projektowanie Domów Jednorodzinnych\r\nProjekt koncepcyjny: 40 – 70 zł/m²\r\nZakres: rzuty, bryła 3D, zagospodarowanie terenu, bez detali technicznych.\r\nProjekt budowlany (do pozwolenia na budowę): 100 – 180 zł/m²\r\nZakres: komplet dokumentów wymaganych przez urząd, projekty branżowe (instalacje, konstrukcja).\r\nProjekt wykonawczy (detale dla budowlańców): dodatkowe 50 – 100 zł/m²\r\nZakres: dokładne zestawienia materiałów, detale połączeń, precyzyjne rysunki techniczne.\r\nAdaptacja projektu gotowego: 3 500 – 7 000 zł\r\nCena zależy od zakresu zmian w konstrukcji i dopasowania do działki.\r\n2. Architektura Wnętrz (Mieszkania i Domy)\r\nProjekt koncepcyjny (układ funkcjonalny + wizualizacje): 120 – 180 zł/m²\r\nProjekt kompleksowy (z rysunkami dla wykonawców i listą zakupów): 200 – 350 zł/m²\r\nProjekt \"pod klucz\" z nadzorem autorskim: od 400 zł/m² wzwyż.\r\n3. Usługi Dodatkowe i Doradztwo\r\nAnaliza chłonności działki (przed zakupem): 1 500 – 4 000 zł\r\nSprawdzenie, co i jakiej wielkości można wybudować na danej działce.\r\nInwentaryzacja obiektu (pomiary stanu surowego/istniejącego): 15 – 35 zł/m²\r\nNadzór autorski (wizyta na budowie): 300 – 600 zł za wizytę.\r\nKonsultacja architektoniczna (1h): 250 – 500 zł.\r\n4. Obiekty Komercyjne i Przemysłowe\r\nHale, magazyny, biurowce: wyceniane zazwyczaj indywidualnie lub jako % od wartości inwestycji (zazwyczaj 3% – 7% wartości całej budowy).\r\nKluczowe czynniki wpływające na cenę:\r\nLokalizacja: Stawki w Warszawie, Krakowie czy Wrocławiu są o ok. 20-30% wyższe niż w mniejszych miastach.\r\nStopień skomplikowania: Dom energooszczędny lub na trudnym, pochyłym terenie będzie droższy w projektowaniu.\r\nRenoma pracowni: Znane biura architektoniczne liczą sobie stawki \"premium\".\r\nWskazówka: Przygotowując ofertę dla klienta, zawsze określaj liczbę wariantów koncepcji (np. dwie wersje układu parteru) oraz liczbę spotkań w cenie.\r\nAktualne standardy i porady dotyczące umów znajdziesz na stronie Izby Architektów Rzeczypospolitej Polskiej (IARP), która reguluje zasady etyki i standardy wykonywania zawodu",
+      "billing": {
+        "company_name": "",
+        "nip": "",
+        "address": "",
+        "invoice_email": ""
+      },
+      "architects": [
+        {
+          "id": "arch_1LAlPyQEitA",
+          "name": "HUBERT STENZEL",
+          "email": "hubertstenzel@gmail.com",
+          "token": "-rhiTcg4pvUybIDI5me5lw"
+        },
+        {
+          "id": "arch_UOthtL1sr2A",
+          "name": "Franek",
+          "email": "franekstenzel@gmail.com",
+          "token": "JcrOQiiwHlS27CTPBsUvoQ"
+        }
+      ],
+      "stripe": {
+        "status": "inactive",
+        "customer_id": "",
+        "subscription_id": ""
+      },
+      "usage": {
+        "period": "2025-12",
+        "forms_sent": 2
+      }
+    },
+    "cmp_DhG_9RPEVTs": {
+      "id": "cmp_DhG_9RPEVTs",
+      "name": "KATARZYNA",
+      "email": "katarzynastenzel@gmail.com",
+      "password_hash": "ONtgB9IXGmYFy7zXwy1OEg==$2wAL9yovvIqlYSuNW9Ur55iyR7ZnyVDAk4SRtR6aslk=",
+      "created_at": 1766512575,
+      "pricing_text": "",
+      "billing": {
+        "company_name": "",
+        "nip": "",
+        "address": "",
+        "invoice_email": ""
+      },
+      "architects": [
+        {
+          "id": "arch_811l8GPcFD4",
+          "name": "Katarzyna",
+          "email": "katarzynastenzel@gmail.com",
+          "token": "ySc8GjdaoNRIeitxP6PMUw"
+        }
+      ],
+      "stripe": {
+        "status": "inactive",
+        "customer_id": "",
+        "subscription_id": ""
+      }
+    }
+  },
+  "submit_tokens": {
+    "UVGeF50yS3eAAVFLZDKA4Q": 1766765319,
+    "Kt34cZAoLyeDj-F0EN2gug": 1766767716
+  }
+}
