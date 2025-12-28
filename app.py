@@ -10,7 +10,6 @@ import base64
 import hashlib
 import secrets
 import datetime
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Request
@@ -30,42 +29,44 @@ except Exception:
 
 
 # =========================
-# 0) KONFIG – UZUPEŁNIASZ TU (opcjonalnie)
+# 0) KONFIG – ENV (Render)
+# Nazwy zgodne z Twoim screenem z Render
 # =========================
 
 APP_NAME = "ArchiBot"
-DATA_FILE = os.getenv("DATA_FILE", "data.json")
+DATA_FILE = os.getenv("DATA_FILE", "data.json").strip()
 
-# Base URL do linków (w DEV może zostać)
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").strip()
 
-# Sesje
-APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "")
+# Sesje (Render: SESSION_SECRET)
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
 
-# OpenAI (opcjonalne)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+# OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5").strip()
 
-# Email bota (opcjonalne – jak brak, raport wyświetli się w przeglądarce)
-BOT_EMAIL = os.getenv("BOT_EMAIL", "twoj.bot.architektoniczny@gmail.com")
-BOT_EMAIL_PASSWORD = os.getenv("BOT_EMAIL_PASSWORD", "")  # np. Gmail App Password
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+# Email bota (Gmail App Password)
+BOT_EMAIL = os.getenv("BOT_EMAIL", "").strip()
+# usuwamy spacje z hasła aplikacji (w Google często jest "xxxx xxxx xxxx xxxx")
+BOT_EMAIL_PASSWORD = os.getenv("BOT_EMAIL_PASSWORD", "").strip().replace(" ", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587").strip() or "587")
 
-# Stripe (opcjonalne)
-ENABLE_STRIPE = os.getenv("ENABLE_STRIPE", "false").lower() in ("1", "true", "yes", "y", "on")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID_MONTHLY = os.getenv("STRIPE_PRICE_ID_MONTHLY", "")  # price_...
-STRIPE_PRICE_ID_YEARLY = os.getenv("STRIPE_PRICE_ID_YEARLY", "")    # price_...
+# Stripe (Render: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_YEARLY)
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_PRICE_ID_MONTHLY = os.getenv("STRIPE_PRICE_ID_MONTHLY", "").strip()
+STRIPE_PRICE_ID_YEARLY = os.getenv("STRIPE_PRICE_ID_YEARLY", "").strip()
 
-# DEV: pozwól działać bez subskrypcji (włączone domyślnie, żeby testować)
+# Jeżeli masz secret key i ceny → traktujemy Stripe jako gotowy
+ENABLE_STRIPE = bool(STRIPE_SECRET_KEY and (STRIPE_PRICE_ID_MONTHLY or STRIPE_PRICE_ID_YEARLY))
+
+# DEV bypass (Render: DEV_BYPASS_SUBSCRIPTION)
 DEV_BYPASS_SUBSCRIPTION = os.getenv("DEV_BYPASS_SUBSCRIPTION", "true").lower() in ("1", "true", "yes", "y", "on")
 
 
 # =========================
 # 1) KOSZT BUDOWY (V1: tabela założeń)
-# Docelowo: integracja z zewnętrznym źródłem (API/dane rynkowe).
 # =========================
 
 BUILD_COST_M2_PLN = {
@@ -73,7 +74,6 @@ BUILD_COST_M2_PLN = {
     "Standard": 6000,
     "Premium": 8000,
 }
-# korekty (z grubsza)
 REGION_MULTIPLIER = {
     "Duże miasto (Warszawa/Kraków/Wrocław/Gdańsk/Poznań)": 1.15,
     "Miasto 100k+": 1.05,
@@ -83,8 +83,7 @@ REGION_MULTIPLIER = {
 
 
 # =========================
-# 2) FORMULARZ – „WSZYSTKO” (V1 dom jednorodzinny)
-# Zostawiamy pola opcjonalne. AI ma wypisać braki + wnioski.
+# 2) FORMULARZ – „WSZYSTKO”
 # =========================
 
 Field = Dict[str, Any]
@@ -244,14 +243,9 @@ def _save_db(db: Dict[str, Any]) -> None:
 def _now_ts() -> int:
     return int(time.time())
 
-# =========================
-# Limity: formularze / miesiąc (per firma)
-# =========================
-
 FORMS_PER_MONTH_LIMIT = 100
 
 def _period_key(ts: Optional[int] = None) -> str:
-    # klucz okresu w formacie YYYY-MM (UTC)
     dt = datetime.datetime.utcfromtimestamp(ts or _now_ts())
     return f"{dt.year:04d}-{dt.month:02d}"
 
@@ -272,18 +266,12 @@ def _increment_forms_sent(db: Dict[str, Any], company_id: str) -> None:
     _ensure_usage_period(c)
     c["usage"]["forms_sent"] = int(c["usage"].get("forms_sent") or 0) + 1
 
-# Prosta ochrona przed podwójnym submit (idempotency)
 def _new_submit_token() -> str:
     return secrets.token_urlsafe(16)
 
 def _mark_submit_token_used(db: Dict[str, Any], token: str, ttl_seconds: int = 6 * 60 * 60) -> bool:
-    """
-    Zwraca True jeśli token był już użyty (duplikat), False jeśli właśnie go zarejestrowaliśmy.
-    Trzymamy krótką pamięć tokenów w DB, żeby przypadkowe podwójne kliknięcie nie wysłało 2 formularzy.
-    """
     meta = db.setdefault("submit_tokens", {})
     now = _now_ts()
-    # sprzątanie starych tokenów (best-effort)
     try:
         for k, ts in list(meta.items()):
             if now - int(ts) > ttl_seconds:
@@ -427,7 +415,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     .badge.ok {{ color: var(--ok); border-color: rgba(73,209,125,0.35); background: rgba(73,209,125,0.08); }}
     .badge.bad {{ color: var(--danger); border-color: rgba(255,91,91,0.35); background: rgba(255,91,91,0.08); }}
 
-    /* "prezentacja" */
     .deck {{ scroll-snap-type: y mandatory; }}
     section.slide {{
       scroll-snap-align: start;
@@ -470,12 +457,8 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       border-radius: 22px;
       box-shadow: var(--shadow);
     }}
-    .card {{
-      padding: 20px;
-    }}
-    .stats {{
-      display:grid; gap: 14px;
-    }}
+    .card {{ padding: 20px; }}
+    .stats {{ display:grid; gap: 14px; }}
     .stat {{
       padding: 16px;
       border-radius: 18px;
@@ -538,7 +521,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       border-top: 1px solid rgba(255,255,255,0.06);
     }}
 
-    /* Formularz */
     .formwrap {{ padding: 32px 0 60px; }}
     .notice {{
       padding: 14px 16px;
@@ -583,7 +565,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     }}
     input::placeholder, textarea::placeholder {{ color: rgba(238,242,255,0.40); }}
     textarea {{ min-height: 90px; resize: vertical; }}
-    select option {{ color: #0b0f1a; background: #ffffff; }} /* fix biały na białym */
+    select option {{ color: #0b0f1a; background: #ffffff; }}
     .field.full {{ grid-column: 1 / -1; }}
     .checkrow {{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 14px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }}
     .checkrow input[type="checkbox"] {{ width: 18px; height: 18px; }}
@@ -758,7 +740,6 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
 # =========================
 
 def fallback_report(form: Dict[str, Any], pricing_text: str) -> str:
-    # prosta heurystyka: metraż * stawka build + informacja o brakach
     area = float(form.get("usable_area_m2", 0) or 0)
     standard = form.get("cost_standard") or "Standard"
     region = form.get("region_type") or "Mniejsze miasto / okolice"
@@ -816,82 +797,27 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     system = (
-
         "Jesteś doświadczonym architektem-prowadzącym i kosztorysantem w Polsce. "
-
         "Tworzysz RAPORT DLA ARCHITEKTA na podstawie briefu wypełnionego przez klienta-nieprofesjonalistę. "
-
         "Twoim celem jest: (a) zebrać i uporządkować informacje, (b) uzupełnić typowymi ZAŁOŻENIAMI tam, gdzie klient nie wie, "
-
-        "oraz (c) przygotować wyczerpujące uzasadnienie i kalkulację kosztów – tak, jak zrobiłby to architekt/kosztorysant wstępnie.\n\n"
-
-
-
+        "oraz (c) przygotować wyczerpujące uzasadnienie i kalkulację kosztów.\n\n"
         "Wymagany format (użyj nagłówków Markdown):\n"
-
         "## 1) Streszczenie projektu (1–2 akapity)\n"
-
         "## 2) Dane wejściowe z briefu (tabela: parametr → wartość)\n"
-
         "## 3) Kluczowe ZAŁOŻENIA do kosztorysu (co przyjmujesz i dlaczego)\n"
-
         "## 4) Kalkulacja kosztu budowy – uzasadnienie krok po kroku\n"
-
         "- Podaj widełki PLN oraz rozbij koszt na kategorie (stan 0, stan surowy, dach, stolarka, instalacje, wykończenie, zagospodarowanie, przyłącza, nadzory, rezerwa).\n"
-
-        "- W każdej kategorii wyjaśnij, jakie elementy wchodzą w zakres i jak materiały/standard wpływają na cenę.\n"
-
-        "- Używaj danych z tabeli kosztów m² (standard_base_m2_pln i region_multiplier) jako punktu startowego, ale DOPRECYZUJ wynik poprzez korekty za:\n"
-
-        "  * bryłę/kondygnacje/dach (złożoność),\n"
-
-        "  * technologię ścian, elewację, okna,\n"
-
-        "  * standard instalacji (pompa ciepła, rekuperacja, PV, smart),\n"
-
-        "  * standard wykończenia (łazienki/kuchnia/podłogi/drzwi/schody),\n"
-
-        "  * roboty zewnętrzne (ogrodzenie, podjazd, retencja).\n"
-
         "- Jeżeli brakuje danych, pokaż MIN/MAX scenariusz i napisz od czego zależy.\n"
-
-        "- Dodaj krótką tabelę: 'założenie → wpływ na koszt (+/–)'.\n\n"
-
-
-
         "## 5) Co architekt MUSI jeszcze wywnioskować / przeliczyć (checklista obliczeń)\n"
-
-        "- np. wskaźniki z MPZP/WZ, PZT, bilans powierzchni, analiza nasłonecznienia, odległości, dojazd ppoż., dobór konstrukcji, obliczenia cieplne U, dobór źródła ciepła, zapotrzebowanie mocy.\n\n"
-
-        "## 6) Braki i pytania do klienta (krótkie, jednoznaczne – podziel na: 'must-have' i 'nice-to-have')\n"
-
-        "## 7) Checklista dokumentów i formalności (MPZP/WZ, mapa, geotechnika, warunki przyłączy itd.)\n"
-
-        "## 8) Ryzyka i kolizje (informacyjnie, bez porady prawnej)\n"
-
+        "## 6) Braki i pytania do klienta (must-have / nice-to-have)\n"
+        "## 7) Checklista dokumentów i formalności\n"
+        "## 8) Ryzyka i kolizje (bez porady prawnej)\n"
         "## 9) Wycena wynagrodzenia projektowego na podstawie CENNIKA firmy\n"
-
-        "- Zinterpretuj tekst cennika, policz, pokaż rachunek i finalne widełki.\n"
-
-        "## 10) Rekomendowane następne kroki (konkretna kolejność działań)\n\n"
-
-
-
-        "Ważne zasady:\n"
-
-        "- Pisz po polsku. Bądź bardzo konkretny i wyczerpujący.\n"
-
-        "- Nie zakładaj wiedzy technicznej klienta; jeśli coś wygląda na nieprecyzyjne, sformułuj to jako założenie i dopisz pytanie kontrolne.\n"
-
-        "- Nie udzielaj porady prawnej; przy przepisach pisz 'do weryfikacji w MPZP/WZ/WT'.\n"
-
+        "## 10) Rekomendowane następne kroki\n"
     )
 
     user_payload = {
-        "company": {
-            "name": company.get("name"),
-            "email": company.get("email"),
-        },
+        "company": {"name": company.get("name"), "email": company.get("email")},
         "architect": architect,
         "pricing_text_from_company": pricing_text,
         "brief": form,
@@ -902,7 +828,6 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
         "note": "Jeżeli brakuje danych, wskaż co można założyć i co koniecznie trzeba dopytać."
     }
 
-    # bezpiecznie: limit długości
     prompt = json.dumps(user_payload, ensure_ascii=False)
 
     try:
@@ -912,7 +837,6 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            
         )
         return resp.choices[0].message.content or fallback_report(form, pricing_text)
     except Exception as e:
@@ -920,14 +844,26 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
 
 
 # =========================
-# 7) Email (opcjonalnie)
+# 7) Email (NAPRAWIONE + LOGI)
 # =========================
 
 def send_email(to_email: str, subject: str, body: str) -> bool:
-    if not BOT_EMAIL or not BOT_EMAIL_PASSWORD:
+    """
+    Wysyłka przez Gmail (App Password).
+    Loguje powód błędu w Render logs jako: [EMAIL] ...
+    """
+    to_email = (to_email or "").strip()
+    if not to_email:
+        print("[EMAIL] missing recipient")
         return False
+
+    if not BOT_EMAIL or not BOT_EMAIL_PASSWORD:
+        print("[EMAIL] missing BOT_EMAIL or BOT_EMAIL_PASSWORD")
+        return False
+
     try:
         import smtplib
+        import ssl
         from email.message import EmailMessage
 
         msg = EmailMessage()
@@ -936,12 +872,29 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
         msg["Subject"] = subject
         msg.set_content(body)
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-            s.starttls()
+        # 1) STARTTLS 587
+        try:
+            with smtplib.SMTP(SMTP_HOST, 587, timeout=20) as s:
+                s.ehlo()
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+                s.login(BOT_EMAIL, BOT_EMAIL_PASSWORD)
+                s.send_message(msg)
+            print(f"[EMAIL] sent via SMTP 587 to={to_email}")
+            return True
+        except Exception as e1:
+            print(f"[EMAIL] SMTP587 failed: {type(e1).__name__}: {e1}")
+
+        # 2) Fallback SSL 465
+        with smtplib.SMTP_SSL(SMTP_HOST, 465, timeout=20, context=ssl.create_default_context()) as s:
+            s.ehlo()
             s.login(BOT_EMAIL, BOT_EMAIL_PASSWORD)
             s.send_message(msg)
+        print(f"[EMAIL] sent via SMTP 465 to={to_email}")
         return True
-    except Exception:
+
+    except Exception as e:
+        print(f"[EMAIL] FAILED: {type(e).__name__}: {e}")
         return False
 
 
@@ -955,7 +908,6 @@ def stripe_ready() -> bool:
 def subscription_active(company: Dict[str, Any]) -> bool:
     if DEV_BYPASS_SUBSCRIPTION:
         return True
-    # jeśli Stripe włączony: sprawdzamy status
     st = (company.get("stripe") or {}).get("status") or ""
     return st in ("active", "trialing")
 
@@ -969,7 +921,12 @@ def stripe_init() -> None:
 # =========================
 
 app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key=APP_SECRET_KEY, same_site="lax", https_only=False)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET or "dev-secret-change-me",
+    same_site="lax",
+    https_only=True,
+)
 
 def get_company(request: Request) -> Optional[Dict[str, Any]]:
     cid = request.session.get("company_id")
@@ -992,7 +949,7 @@ def flash_html(msg: str) -> str:
 
 
 # =========================
-# 10) Landing page (prezentacja do scrollowania)
+# 10) Landing page
 # =========================
 
 @app.get("/", response_class=HTMLResponse)
@@ -1023,7 +980,7 @@ def home():
             </div>
             <div style="height:18px"></div>
             <p class="muted">
-              V1 działa nawet bez Stripe i bez maila: raport pokaże się w przeglądarce. Po podłączeniu usług – automatyzacja end-to-end.
+              V1 działa nawet bez Stripe i bez maila: raport pokaże się w przeglądarce (fallback). Po podłączeniu usług – automatyzacja end-to-end.
             </p>
           </div>
           <div class="panel card">
@@ -1511,7 +1468,7 @@ async def demo_submit(request: Request):
             form_dict[k] = v
     form_clean = _clean_form_dict(form_dict)
 
-    report = ai_report(form_clean, pricing_text="(DEMO) brak cennika firmy", company={"name":"DEMO","email":""}, architect={"name":"DEMO","email":""})
+    report = ai_report(form_clean, pricing_text="(DEMO) brak cennika firmy", company={"name": "DEMO", "email": ""}, architect={"name": "DEMO", "email": ""})
 
     body = f"""
     <div class="wrap formwrap">
@@ -1548,7 +1505,7 @@ def form_for_client(token: str, request: Request):
         return HTMLResponse(layout("Błąd", body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=404)
 
     if not subscription_active(company):
-        return HTMLResponse(layout("Subskrypcja", body=f'<div class="wrap formwrap"><h1>Subskrypcja nieaktywna</h1><p class="muted">Formularz jest zablokowany do czasu opłacenia.</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
+        return HTMLResponse(layout("Subskrypcja", body='<div class="wrap formwrap"><h1>Subskrypcja nieaktywna</h1><p class="muted">Formularz jest zablokowany do czasu opłacenia.</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
 
     submit_token = _new_submit_token()
     return HTMLResponse(render_form(
@@ -1567,11 +1524,11 @@ async def submit_form(token: str, request: Request):
     if not subscription_active(company):
         return HTMLResponse("Subskrypcja nieaktywna", status_code=403)
 
-    # limit 100 formularzy / miesiąc + ochrona przed podwójnym wysłaniem
     db = _load_db()
     company_id = company.get("id")
     if not company_id or company_id not in db.get("companies", {}):
         return HTMLResponse("Błąd danych firmy", status_code=500)
+
     c = db["companies"][company_id]
     _ensure_usage_period(c)
     if _forms_remaining(c) <= 0:
@@ -1584,8 +1541,8 @@ async def submit_form(token: str, request: Request):
         """
         return HTMLResponse(layout("Limit", body=body, nav=nav_links()), status_code=429)
 
+    # request.form() jest cache'owane przez Starlette – można wywołać kilka razy
     submit_token = str((await request.form()).get("_submit_token") or "")
-    # Uwaga: request.form() już wywołamy poniżej ponownie – Starlette cache’uje wynik, więc to jest OK.
     if submit_token:
         if _mark_submit_token_used(db, submit_token):
             body = """
@@ -1602,7 +1559,6 @@ async def submit_form(token: str, request: Request):
     _save_db(db)
 
     formdata = await request.form()
-
     form_dict: Dict[str, Any] = {}
     for k in formdata.keys():
         if k == "attachments":
@@ -1615,7 +1571,6 @@ async def submit_form(token: str, request: Request):
 
     form_clean = _clean_form_dict(form_dict)
     pricing_text = company.get("pricing_text", "") or ""
-
     report = ai_report(form_clean, pricing_text=pricing_text, company=company, architect=architect)
 
     sent = False
@@ -1625,6 +1580,8 @@ async def submit_form(token: str, request: Request):
             subject=f"[{APP_NAME}] Nowy brief – {company.get('name','')} / {architect.get('name','')}",
             body=report,
         )
+    else:
+        print("[EMAIL] architect email missing in DB")
 
     if sent:
         body = """
@@ -1638,11 +1595,11 @@ async def submit_form(token: str, request: Request):
         """
         return HTMLResponse(layout("Dziękujemy", body=body, nav=nav_links()))
 
-    # brak maila → pokaż raport na ekranie (żeby zawsze działało)
+    # fallback (gdy email padnie) – raport na ekranie
     body = f"""
     <div class="wrap formwrap">
       <h1 style="margin:0 0 10px">Raport</h1>
-      <p class="muted">Email bota nie jest skonfigurowany – raport wyświetlono na ekranie.</p>
+      <p class="muted">Wysyłka e-mail nie powiodła się – sprawdź Render Logs (linie [EMAIL]). Raport wyświetlono na ekranie.</p>
       <div class="panel card" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">
 {esc(report)}
       </div>
@@ -1655,7 +1612,7 @@ async def submit_form(token: str, request: Request):
 
 
 # =========================
-# 15) Stripe Checkout + Webhook (opcjonalnie)
+# 15) Stripe Checkout + Webhook
 # =========================
 
 @app.get("/billing/checkout")
@@ -1675,7 +1632,6 @@ def billing_checkout(request: Request, plan: str = "monthly"):
     if not price_id:
         return RedirectResponse(url="/dashboard", status_code=302)
 
-    # Tworzymy checkout session
     try:
         session = stripe.checkout.Session.create(  # type: ignore
             mode="subscription",
@@ -1686,7 +1642,8 @@ def billing_checkout(request: Request, plan: str = "monthly"):
             metadata={"company_id": company.get("id")},
         )
         return RedirectResponse(url=session.url, status_code=303)  # type: ignore
-    except Exception:
+    except Exception as e:
+        print(f"[STRIPE] checkout error: {type(e).__name__}: {e}")
         return RedirectResponse(url="/dashboard", status_code=302)
 
 @app.post("/stripe/webhook")
@@ -1695,16 +1652,15 @@ async def stripe_webhook(request: Request):
         return PlainTextResponse("stripe disabled", status_code=200)
 
     stripe_init()
-
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
 
     try:
         event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)  # type: ignore
-    except Exception:
+    except Exception as e:
+        print(f"[STRIPE] bad signature: {type(e).__name__}: {e}")
         return PlainTextResponse("bad signature", status_code=400)
 
-    # Ustawiamy status subskrypcji w bazie
     etype = event.get("type")
     data = event.get("data", {}).get("object", {})
 
@@ -1717,7 +1673,6 @@ async def stripe_webhook(request: Request):
         return PlainTextResponse("ok", status_code=200)
 
     if etype in ("checkout.session.completed",):
-        # checkout session ma subscription i customer
         db["companies"][company_id]["stripe"]["status"] = "active"
         db["companies"][company_id]["stripe"]["customer_id"] = data.get("customer", "") or ""
         db["companies"][company_id]["stripe"]["subscription_id"] = data.get("subscription", "") or ""
@@ -1737,7 +1692,12 @@ async def stripe_webhook(request: Request):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "stripe_ready": stripe_ready(), "openai_ready": bool(OPENAI_API_KEY and OpenAI is not None)}
+    return {
+        "ok": True,
+        "stripe_ready": stripe_ready(),
+        "openai_ready": bool(OPENAI_API_KEY and OpenAI is not None),
+        "email_ready": bool(BOT_EMAIL and BOT_EMAIL_PASSWORD),
+    }
 
 
 # =========================
@@ -1745,6 +1705,6 @@ def health():
 # =========================
 
 if __name__ == "__main__":
-    # Uwaga: odpalaj w CMD/PowerShell (nie zamykaj okna), potem wejdź: http://localhost:8000
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
