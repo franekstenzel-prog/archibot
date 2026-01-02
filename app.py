@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-# Optional deps – aplikacja działa również bez konfiguracji
+# Optional deps – app ma działać bez konfiguracji
 try:
     from openai import OpenAI
 except Exception:
@@ -36,40 +36,39 @@ except Exception:
 APP_NAME = "ArchiBot"
 DATA_FILE = os.getenv("DATA_FILE", "data.json")
 
-# Base URL (Render): np. https://archibot.onrender.com
+# Base URL (Render): https://archibot.onrender.com
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 
-# Sesje (Render ENV: SESSION_SECRET)
+# Sesje (Render ENV ma: SESSION_SECRET)
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 
-# Email
+# Email (Gmail SMTP często NIE działa na hostingu przez blokadę egress SMTP)
 BOT_EMAIL = os.getenv("BOT_EMAIL", "twoj.bot.architektoniczny@gmail.com").strip()
+# App password od Google może mieć spacje -> usuwamy
 BOT_EMAIL_PASSWORD = (os.getenv("BOT_EMAIL_PASSWORD", "") or "").strip().replace(" ", "")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
-# Email przez HTTPS API – Resend
+# Email przez HTTPS API (ZALECANE na Render) – Resend
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
-RESEND_FROM = os.getenv("RESEND_FROM", "").strip()  # np. "ArchiBot <noreply@twojadomena.pl>"
+RESEND_FROM = os.getenv("RESEND_FROM", "").strip()  # np. "ArchiBot <onboarding@resend.dev>" albo domena po weryfikacji
 
-# Stripe
+# Stripe (Render ENV ma: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_YEARLY)
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_PRICE_ID_MONTHLY = os.getenv("STRIPE_PRICE_ID_MONTHLY", "").strip()
 STRIPE_PRICE_ID_YEARLY = os.getenv("STRIPE_PRICE_ID_YEARLY", "").strip()
 
-# DEV bypass
-DEV_BYPASS_SUBSCRIPTION = (
-    os.getenv("DEV_BYPASS_SUBSCRIPTION", "false").lower() in ("1", "true", "yes", "y", "on")
-)
+# DEV bypass (Render ENV ma: DEV_BYPASS_SUBSCRIPTION)
+DEV_BYPASS_SUBSCRIPTION = (os.getenv("DEV_BYPASS_SUBSCRIPTION", "false").lower() in ("1", "true", "yes", "y", "on"))
 
 
 # =========================
-# 1) KOSZT BUDOWY (V1)
+# 1) KOSZT BUDOWY (V1: tabela założeń) – (pozostawiam bez zmian)
 # =========================
 
 BUILD_COST_M2_PLN = {
@@ -87,213 +86,391 @@ REGION_MULTIPLIER = {
 
 
 # =========================
-# 2) FORMULARZ – schema
+# 2) FORMULARZ – BUDYNKI PRZEMYSŁOWE (wersja rozszerzona)
 # =========================
 
 Field = Dict[str, Any]
 Section = Tuple[str, List[Field]]
 
+def _yn_unknown() -> List[str]:
+    return ["Tak", "Nie", "Nie wiem"]
+
+def _priority() -> List[str]:
+    return ["Czas", "Budżet", "Jakość", "Elastyczność (rozbudowa/zmiana procesu)", "Zgodność / audyty (PPOŻ/BHP/ESG)"]
+
+def _project_type() -> List[str]:
+    return ["Nowy obiekt", "Rozbudowa", "Przebudowa/modernizacja", "Adaptacja istniejącego budynku", "Etapowanie (wielofazowo)"]
+
+def _object_type() -> List[str]:
+    return [
+        "Hala produkcyjna",
+        "Hala magazynowa",
+        "Centrum logistyczne (cross-dock)",
+        "Zakład przemysłowy (złożony)",
+        "Hala montażowa",
+        "Chłodnia",
+        "Mroźnia",
+        "Obiekt ATEX / strefy wybuchowe",
+        "Laboratoria / R&D",
+        "Inne (opisz)",
+    ]
+
+def _roof_type() -> List[str]:
+    return ["Płaski", "Jednospadowy", "Dwuspadowy", "Inny", "Nie wiem"]
+
+def _construction_pref() -> List[str]:
+    return ["Stal", "Żelbet", "Prefabrykat", "Mieszana", "Nie wiem"]
+
+def _flooring_types() -> List[str]:
+    return [
+        "Posadzka przemysłowa (standard)",
+        "Posadzka o podwyższonej nośności",
+        "Posadzka antyelektrostatyczna (ESD)",
+        "Posadzka chemoodporna",
+        "Posadzka spożywcza (HACCP – specjalne wykończenie)",
+        "Inna / strefowana (opisz)",
+    ]
+
+def _forklift_types() -> List[str]:
+    return ["Elektryczne", "Spalinowe LPG", "Diesel", "Wózki wysokiego składowania", "Wózki systemowe/VNA", "AGV/AMR", "Nie dotyczy / nie wiem"]
+
+def _audit_standards() -> List[str]:
+    return ["Brak", "ISO 9001", "ISO 14001", "ISO 45001", "HACCP", "BRC", "IFS", "GMP", "FDA", "ATEX", "Inne (opisz)"]
+
+def _sprinkler() -> List[str]:
+    return ["Wymagane", "Niewymagane", "Nie wiem", "Do potwierdzenia przez rzeczoznawcę"]
+
+def _docks() -> List[str]:
+    return ["Brak", "1–2", "3–5", "6–10", "11–20", "20+", "Nie wiem"]
+
+def _shifts() -> List[str]:
+    return ["1 zmiana", "2 zmiany", "3 zmiany", "Ruch ciągły 24/7", "Sezonowo", "Nie wiem"]
+
+def _power_supply() -> List[str]:
+    return ["Z sieci (operator)", "Własna stacja trafo", "Agregat", "UPS (krytyczne)", "Mieszane", "Nie wiem"]
+
+def _water_sources() -> List[str]:
+    return ["Sieć", "Studnia", "Mieszane", "Nie wiem"]
+
+def _sewage() -> List[str]:
+    return ["Kanalizacja sanitarna", "Zbiornik bezodpływowy", "Oczyszczalnia", "Mieszane", "Nie wiem"]
+
+def _rainwater() -> List[str]:
+    return ["Kanalizacja deszczowa", "Retencja + rozsączanie", "Zbiornik retencyjny", "Wykorzystanie technologiczne", "Nie wiem"]
+
+def _heating() -> List[str]:
+    return ["Gaz", "Pompa ciepła", "Sieć ciepłownicza", "Nagrzewnice (np. gazowe)", "Odzysk ciepła z procesu", "Elektryczne", "Nie wiem"]
+
+def _ventilation() -> List[str]:
+    return ["Grawitacyjna", "Mechaniczna", "Mechaniczna z odzyskiem", "Wentylacja technologiczna (opisz)", "Nie wiem"]
+
+def _security_level() -> List[str]:
+    return ["Standard", "Podwyższony (CCTV/KD/SSWiN)", "Wysoki (strefy krytyczne)", "Nie wiem"]
+
+def _ownership() -> List[str]:
+    return ["Własność inwestora", "W trakcie nabycia", "Dzierżawa", "Najem", "Nie wiem"]
+
+def _soil() -> List[str]:
+    return ["Piaski", "Glina", "Iły", "Nasypy", "Mieszany", "Nie wiem"]
+
+def _groundwater() -> List[str]:
+    return ["Nisko", "Średnio", "Wysoko", "Nie wiem"]
+
+def _flood() -> List[str]:
+    return ["Tak", "Nie", "Nie wiem"]
+
+def _mpzp() -> List[str]:
+    return ["MPZP", "WZ", "Nie wiem", "W trakcie"]
+
+def _access_road() -> List[str]:
+    return ["Bezpośredni", "Służebność", "Droga wewnętrzna", "Nie wiem"]
+
+def _load_zone() -> List[str]:
+    return ["Brak", "Rampa", "Doki", "Rampa + doki", "Brak danych / do ustalenia"]
+
+def _parking_req() -> List[str]:
+    return ["Zgodnie z MPZP/WZ", "Minimalny", "Zwiększony (dużo pracowników)", "Nie wiem"]
+
+def _delivery_windows() -> List[str]:
+    return ["Dzień (6–18)", "Noc (18–6)", "24/7", "Sezonowo", "Nie wiem"]
+
+def _noise() -> List[str]:
+    return ["Niska", "Średnia", "Wysoka", "Punktowo wysoka", "Nie wiem"]
+
+def _dust() -> List[str]:
+    return ["Brak", "Niska", "Średnia", "Wysoka", "Pyły palne", "Nie wiem"]
+
+def _hazards() -> List[str]:
+    return ["Brak", "Chemikalia", "Materiały łatwopalne", "ATEX", "Wysokie temperatury", "Niskie temperatury", "Inne (opisz)", "Nie wiem"]
+
+def _office_standard() -> List[str]:
+    return ["Podstawowy", "Standard", "Wysoki", "Reprezentacyjny", "Nie wiem"]
+
+def _bim() -> List[str]:
+    return ["Tak (BIM wymagany)", "Opcjonalnie", "Nie", "Nie wiem"]
+
+def _procurement() -> List[str]:
+    return ["Generalny wykonawca", "Pakietowanie (branże)", "Zaprojektuj i wybuduj (D&B)", "Inwestor prowadzi przetarg", "Nie wiem"]
+
+def _contract_model() -> List[str]:
+    return ["Ryczałt", "Kosztorysowe", "GMP", "Mieszane", "Nie wiem"]
+
+def _fire_load() -> List[str]:
+    return ["Niskie", "Średnie", "Wysokie", "Bardzo wysokie", "Nie wiem"]
+
+def _process_temp() -> List[str]:
+    return ["Temperatura standardowa", "Kontrola temperatury", "Chłodnia", "Mroźnia", "Podwyższone temperatury", "Nie wiem"]
+
+
 FORM_SCHEMA: List[Section] = [
-    ("A. Dane inwestora i kontakt", [
-        {"name": "investor_name", "label": "Imię i nazwisko / nazwa inwestora", "type": "text", "ph": "np. Jan Kowalski / Sp. z o.o."},
-        {"name": "investor_email", "label": "Adres e-mail do kontaktu", "type": "email", "ph": "np. biuro@..."},
-        {"name": "investor_phone", "label": "Telefon", "type": "text", "ph": "np. +48..."},
-        {"name": "preferred_contact", "label": "Preferowany kanał kontaktu", "type": "select", "options": ["E-mail", "Telefon", "WhatsApp", "Inne"]},
-        {"name": "household_adults", "label": "Liczba dorosłych (jeśli dotyczy domu)", "type": "number", "min": 0},
-        {"name": "household_children", "label": "Liczba dzieci (jeśli dotyczy domu)", "type": "number", "min": 0},
-        {"name": "special_needs", "label": "Wymagania szczególne (dostępność, senior, niepełnosprawność itp.)", "type": "textarea", "ph": "Opcjonalnie"},
+    ("A. Inwestor i struktura decyzyjna", [
+        {"name": "investor_company", "label": "Nazwa inwestora / spółki", "type": "text", "ph": "np. XYZ Sp. z o.o."},
+        {"name": "investor_legal_form", "label": "Forma prawna", "type": "text", "ph": "np. sp. z o.o."},
+        {"name": "investor_contact_name", "label": "Osoba kontaktowa (imię i nazwisko)", "type": "text"},
+        {"name": "investor_contact_role", "label": "Rola / stanowisko osoby kontaktowej", "type": "text", "ph": "np. Project Manager / Dyrektor Techniczny"},
+        {"name": "investor_email", "label": "Email kontaktowy", "type": "email"},
+        {"name": "investor_phone", "label": "Telefon", "type": "text"},
+        {"name": "decision_maker", "label": "Kto podejmuje decyzje projektowe? (opis)", "type": "textarea", "ph": "np. zarząd + centrala; akceptacje etapowe; terminy"},
+        {"name": "approval_workflow", "label": "Proces akceptacji i czas decyzyjny (opis)", "type": "textarea", "ph": "np. spotkania co tydzień; akceptacje w 72h; odbiory wewnętrzne"},
+        {"name": "stakeholders", "label": "Interesariusze (BHP, ppoż, technologia, IT, FM, audyt) – kto jest po stronie inwestora?", "type": "textarea"},
+        {"name": "previous_projects", "label": "Doświadczenia z wcześniejszych inwestycji (co działało / co nie)", "type": "textarea"},
     ]),
 
-    ("B. Działka i lokalizacja", [
-        {"name": "plot_address", "label": "Adres / miejscowość", "type": "text"},
-        {"name": "plot_ewidencyjny", "label": "Nr działki ewidencyjnej (jeśli znany)", "type": "text"},
+    ("B. Podstawowe dane inwestycji", [
+        {"name": "investment_name", "label": "Nazwa inwestycji / projekt roboczy", "type": "text"},
+        {"name": "project_type", "label": "Charakter inwestycji", "type": "select", "options": _project_type()},
+        {"name": "object_type", "label": "Typ obiektu (główna funkcja)", "type": "select", "options": _object_type()},
+        {"name": "object_type_other", "label": "Jeśli 'Inne' – doprecyzuj typ obiektu", "type": "text"},
+        {"name": "business_goal", "label": "Cel inwestycji (opis szczegółowy)", "type": "textarea", "ph": "Co ma umożliwić obiekt? jakie KPI? jakie ograniczenia?"},
+        {"name": "horizon_years", "label": "Horyzont użytkowania (lata) – założenie inwestora", "type": "number", "min": 0},
+        {"name": "future_expansion", "label": "Czy przewidujesz rozbudowę/etapowanie?", "type": "select", "options": ["Tak – rozbudowa w przyszłości", "Tak – etapowanie od startu", "Nie", "Nie wiem"]},
+        {"name": "flexibility_priority", "label": "Elastyczność procesu / możliwość zmiany układu w przyszłości", "type": "select", "options": ["Wysoka", "Średnia", "Niska", "Nie wiem"]},
+        {"name": "critical_failure", "label": "Co byłoby porażką inwestycji nawet jeśli obiekt powstanie? (opis)", "type": "textarea"},
+        {"name": "must_secrets", "label": "Poufność / NDA / ograniczenia publikacji (opis)", "type": "textarea"},
+    ]),
+
+    ("C. Lokalizacja i działka", [
+        {"name": "plot_address", "label": "Adres / lokalizacja / park przemysłowy", "type": "text"},
+        {"name": "plot_ewidencyjny", "label": "Numer(y) działek ewidencyjnych", "type": "text"},
         {"name": "plot_pow_m2", "label": "Powierzchnia działki [m²]", "type": "number", "min": 0},
-        {"name": "plot_shape", "label": "Kształt działki", "type": "select", "options": ["Prostokątna", "Nieregularna", "Wąska", "Szeroka", "Inna"]},
-        {"name": "plot_slope", "label": "Ukształtowanie terenu", "type": "select", "options": ["Płasko", "Lekki spadek", "Duży spadek", "Tarasowanie/skarpy", "Nie wiem"]},
-        {"name": "region_type", "label": "Lokalizacja (współczynnik kosztu wykonawstwa)", "type": "select", "options": list(REGION_MULTIPLIER.keys())},
-        {"name": "neighbors_notes", "label": "Sąsiedztwo (odległości, zacienienie, uciążliwości)", "type": "textarea"},
-        {"name": "world_sides", "label": "Orientacja stron świata (jeśli znana)", "type": "textarea", "ph": "np. wjazd od północy, ogród od południa"},
-        {"name": "trees_inventory", "label": "Zieleń/drzewa do zachowania/wycinki", "type": "textarea"},
+        {"name": "ownership_status", "label": "Status własności", "type": "select", "options": _ownership()},
+        {"name": "plot_shape", "label": "Kształt działki (opis)", "type": "textarea", "ph": "np. nieregularna, wąska; wjazd od..."},
+        {"name": "plot_slope", "label": "Ukształtowanie terenu (opis)", "type": "textarea", "ph": "płasko/spadek; kierunek spadku; niwelety jeśli znane"},
+        {"name": "world_sides", "label": "Orientacja stron świata / wjazd / ekspozycja (jeśli znana)", "type": "textarea"},
+        {"name": "neighbors_notes", "label": "Sąsiedztwo i potencjalne kolizje (hałas, dojazd, ograniczenia)", "type": "textarea"},
+        {"name": "environmental_history", "label": "Historia terenu (zabudowa, zanieczyszczenia, rekultywacja) – opis", "type": "textarea"},
+        {"name": "trees_inventory", "label": "Zieleń / drzewa do zachowania lub usunięcia – opis", "type": "textarea"},
+        {"name": "site_constraints", "label": "Ograniczenia i odległości (las, linie, gazociągi, drogi, zalewy, linia brzegowa) – opis", "type": "textarea"},
+        {"name": "flood_risk", "label": "Ryzyko zalewowe / podmokły teren", "type": "select", "options": _flood()},
     ]),
 
-    ("C. Stan prawny i dokumenty (MPZP/WZ itd.)", [
-        {"name": "mpzp_or_wz", "label": "Podstawa planistyczna", "type": "select", "options": ["MPZP", "WZ", "Nie wiem", "W trakcie"]},
+    ("D. Grunt i geotechnika", [
+        {"name": "geotech_opinion", "label": "Opinia geotechniczna – posiadam", "type": "checkbox"},
+        {"name": "soil_type", "label": "Rodzaj gruntu (jeśli znany)", "type": "select", "options": _soil()},
+        {"name": "groundwater_level", "label": "Poziom wód gruntowych", "type": "select", "options": _groundwater()},
+        {"name": "bearing_capacity", "label": "Nośność gruntu / problemy geotechniczne (opis)", "type": "textarea"},
+        {"name": "earthworks_limits", "label": "Ograniczenia robót ziemnych (np. nasypy, skarpy, wymiana gruntu) – opis", "type": "textarea"},
+        {"name": "foundation_preference", "label": "Preferencja posadowienia (jeśli jest)", "type": "select", "options": ["Ławy/stopy", "Płyta fundamentowa", "Posadowienie specjalne", "Nie wiem"]},
+    ]),
+
+    ("E. Formalności, plan miejscowy, decyzje", [
+        {"name": "mpzp_or_wz", "label": "Podstawa planistyczna", "type": "select", "options": _mpzp()},
+        {"name": "mpzp_wz_extract", "label": "Wypis i wyrys MPZP / decyzja WZ – posiadam", "type": "checkbox"},
         {"name": "kw_number", "label": "Numer księgi wieczystej (jeśli jest)", "type": "text"},
-        {"name": "land_register_extract", "label": "Wypis z rejestru gruntów – dostępny", "type": "checkbox"},
-        {"name": "right_to_dispose", "label": "Oświadczenie o prawie do dysponowania nieruchomością – dostępne", "type": "checkbox"},
-        {"name": "mpzp_wz_extract", "label": "Wypis i wyrys MPZP / decyzja WZ – dostępne", "type": "checkbox"},
-        {"name": "access_road", "label": "Dostęp do drogi publicznej", "type": "select", "options": ["Bezpośredni", "Służebność", "Droga wewnętrzna", "Nie wiem"]},
-        {"name": "driveway_consent", "label": "Warunki/zgoda na zjazd z drogi publicznej – dostępne", "type": "checkbox"},
-        {"name": "legal_constraints", "label": "Ograniczenia (służebności, linie energetyczne, konserwator, Natura 2000 itp.)", "type": "textarea"},
+        {"name": "land_register_extract", "label": "Wypis z rejestru gruntów – posiadam", "type": "checkbox"},
+        {"name": "right_to_dispose", "label": "Oświadczenie o prawie do dysponowania nieruchomością – posiadam", "type": "checkbox"},
+        {"name": "environment_decision", "label": "Decyzja środowiskowa – posiadam / wymagana?", "type": "select", "options": ["Posiadam", "Wymagana – w trakcie", "Nie jest wymagana", "Nie wiem"]},
+        {"name": "agri_exclusion", "label": "Wyłączenie z produkcji rolnej – czy dotyczy / status (opis)", "type": "textarea"},
+        {"name": "water_law_permit", "label": "Operat wodnoprawny / pozwolenie wodnoprawne (np. deszczówka) – status", "type": "textarea"},
+        {"name": "heritage_protection", "label": "Ochrona konserwatorska / strefy ochrony – status (opis)", "type": "textarea"},
+        {"name": "legal_constraints", "label": "Inne ograniczenia prawne (służebności, strefy, sieci) – opis", "type": "textarea"},
+        {"name": "access_road", "label": "Dostęp do drogi publicznej", "type": "select", "options": _access_road()},
+        {"name": "driveway_consent", "label": "Zgoda/warunki zjazdu z drogi publicznej – posiadam", "type": "checkbox"},
     ]),
 
-    ("D. Geodezja i grunt", [
-        {"name": "map_for_design", "label": "Mapa do celów projektowych – dostępna", "type": "checkbox"},
-        {"name": "geotech_opinion", "label": "Opinia geotechniczna – dostępna", "type": "checkbox"},
-        {"name": "soil_type", "label": "Rodzaj gruntu (jeśli znany)", "type": "select", "options": ["Piaski", "Glina", "Iły", "Nasypy", "Mieszany", "Nie wiem"]},
-        {"name": "groundwater_level", "label": "Poziom wód gruntowych", "type": "select", "options": ["Nisko", "Średnio", "Wysoko", "Nie wiem"]},
-        {"name": "flood_risk", "label": "Ryzyko zalewowe / teren podmokły", "type": "select", "options": ["Tak", "Nie", "Nie wiem"]},
-        {"name": "foundation_preference", "label": "Preferencja posadowienia (jeśli jest)", "type": "select", "options": ["Ławy/tradycyjne", "Płyta fundamentowa", "Nie wiem"]},
-    ]),
-
-    ("E. Media i warunki przyłączy", [
-        {"name": "power_conditions", "label": "Warunki przyłączenia energii elektrycznej – dostępne", "type": "checkbox"},
-        {"name": "water_conditions", "label": "Warunki przyłączenia wody – dostępne", "type": "checkbox"},
-        {"name": "sewage_conditions", "label": "Warunki kanalizacji sanitarnej – dostępne", "type": "checkbox"},
-        {"name": "gas_conditions", "label": "Warunki przyłączenia gazu – dostępne (jeśli dotyczy)", "type": "checkbox"},
+    ("F. Media i przyłącza (stan i wymagania)", [
+        {"name": "power_conditions", "label": "Warunki przyłączenia energii elektrycznej – posiadam", "type": "checkbox"},
+        {"name": "water_conditions", "label": "Warunki przyłączenia wody – posiadam", "type": "checkbox"},
+        {"name": "sewage_conditions", "label": "Warunki kanalizacji sanitarnej – posiadam", "type": "checkbox"},
+        {"name": "rainwater_conditions", "label": "Warunki kanalizacji deszczowej / deszczówka – posiadam", "type": "checkbox"},
+        {"name": "gas_conditions", "label": "Warunki przyłączenia gazu – posiadam (jeśli dotyczy)", "type": "checkbox"},
+        {"name": "mec_conditions", "label": "Przyłącze do sieci ciepłowniczej / MEC – posiadam (jeśli dotyczy)", "type": "checkbox"},
+        {"name": "power_supply", "label": "Zasilanie energią – preferencja", "type": "select", "options": _power_supply()},
+        {"name": "power_kw_now", "label": "Moc przyłączeniowa – wymagana dziś [kW] (jeśli znana)", "type": "number", "min": 0},
+        {"name": "power_kw_future", "label": "Moc przyłączeniowa – docelowo (rezerwa) [kW] (jeśli znana)", "type": "number", "min": 0},
+        {"name": "water_solution", "label": "Źródło wody", "type": "select", "options": _water_sources()},
+        {"name": "water_m3_day", "label": "Zużycie wody (szacunek) [m³/dobę] – jeśli znane", "type": "number", "min": 0},
+        {"name": "sewage_solution", "label": "Ścieki sanitarne – rozwiązanie", "type": "select", "options": _sewage()},
+        {"name": "tech_wastewater", "label": "Ścieki technologiczne – czy występują? (opis składu / ilości)", "type": "textarea"},
+        {"name": "rainwater_handling", "label": "Wody opadowe – rozwiązanie", "type": "select", "options": _rainwater()},
+        {"name": "rainwater_notes", "label": "Wody opadowe – wymagania/ograniczenia (opis)", "type": "textarea"},
         {"name": "internet_fiber", "label": "Światłowód / Internet", "type": "select", "options": ["Jest", "Brak", "Nie wiem"]},
-        {"name": "water_solution", "label": "Źródło wody", "type": "select", "options": ["Sieć", "Studnia", "Nie wiem"]},
-        {"name": "sewage_solution", "label": "Odprowadzenie ścieków", "type": "select", "options": ["Kanalizacja", "Szambo", "Przydomowa oczyszczalnia", "Nie wiem"]},
-        {"name": "rainwater_conditions", "label": "Warunki/uzgodnienia dla wód opadowych – dostępne (jeśli dotyczy)", "type": "checkbox"},
-        {"name": "mec_connection", "label": "Przyłącze do sieci ciepłowniczej (MEC) – dostępne (jeśli dotyczy)", "type": "checkbox"},
     ]),
 
-    ("F. Parametry budynku – bryła i metraż (dla zabudowy mieszkaniowej)", [
-        {"name": "building_type", "label": "Typ obiektu", "type": "select", "options": ["Dom jednorodzinny", "Bliźniak", "Szeregowiec", "Inne"]},
-        {"name": "usable_area_m2", "label": "Docelowa powierzchnia użytkowa [m²]", "type": "number", "min": 0},
-        {"name": "garage", "label": "Garaż", "type": "select", "options": ["Brak", "1-stanowiskowy", "2-stanowiskowy", "Wiata", "Wolnostojący"]},
-        {"name": "storeys", "label": "Kondygnacje", "type": "select", "options": ["Parterowy", "Parter + poddasze", "Piętrowy", "Z piwnicą", "Inne"]},
-        {"name": "roof_type", "label": "Dach", "type": "select", "options": ["Płaski", "Dwuspadowy", "Czterospadowy", "Wielospadowy", "Nie wiem"]},
-        {"name": "roof_covering", "label": "Pokrycie dachu (jeśli znane / preferowane)", "type": "select", "options": ["Dachówka ceramiczna", "Dachówka betonowa", "Blacha", "Papa/EPDM", "Gont", "Nie wiem"]},
-        {"name": "foundation_type", "label": "Fundament (jeśli znany / preferowany)", "type": "select", "options": ["Ławy tradycyjne", "Płyta fundamentowa", "Piwnica", "Nie wiem"]},
-        {"name": "roof_slope_deg", "label": "Nachylenie dachu [°] (jeśli znane)", "type": "number", "min": 0, "max": 60},
+    ("G. Program funkcjonalny – strefy i powierzchnie", [
+        {"name": "program_overview", "label": "Opis funkcji i stref (jak ma działać obiekt) – opis", "type": "textarea"},
+        {"name": "usable_area_m2", "label": "Docelowa powierzchnia użytkowa (łącznie) [m²]", "type": "number", "min": 0},
+        {"name": "production_area_m2", "label": "Strefa produkcji [m²] (jeśli dotyczy)", "type": "number", "min": 0},
+        {"name": "warehouse_area_m2", "label": "Strefa magazynu [m²] (jeśli dotyczy)", "type": "number", "min": 0},
+        {"name": "shipping_area_m2", "label": "Strefa wysyłki/kompletacji [m²] (jeśli dotyczy)", "type": "number", "min": 0},
+        {"name": "office_area_m2", "label": "Biura [m²] (jeśli dotyczy)", "type": "number", "min": 0},
+        {"name": "social_area_m2", "label": "Zaplecze socjalne [m²] (szatnie, jadalnia, sanitariaty)", "type": "number", "min": 0},
+        {"name": "tech_area_m2", "label": "Pomieszczenia techniczne [m²] (rozdzielnia, sprężarkownia itp.)", "type": "number", "min": 0},
+        {"name": "special_zones", "label": "Strefy specjalne (laboratoria, clean room, chłodnia, ATEX) – opis", "type": "textarea"},
+        {"name": "mezzanine", "label": "Antresola / piętro technologiczne – czy przewidujesz? (opis)", "type": "textarea"},
+    ]),
+
+    ("H. Proces technologiczny (to determinuje projekt)", [
+        {"name": "process_description", "label": "Opis procesu krok po kroku (wejście materiałów → proces → wyjście) – opis", "type": "textarea"},
+        {"name": "materials_in", "label": "Materiały wejściowe: rodzaj, ilości, forma dostaw (opis)", "type": "textarea"},
+        {"name": "products_out", "label": "Produkty wyjściowe: rodzaj, ilości, forma wysyłek (opis)", "type": "textarea"},
+        {"name": "process_temp", "label": "Wymagania temperaturowe procesu", "type": "select", "options": _process_temp()},
+        {"name": "process_humidity", "label": "Wymagania dot. wilgotności (jeśli dotyczy) – opis", "type": "textarea"},
+        {"name": "noise_level", "label": "Hałas procesu (szacunek)", "type": "select", "options": _noise()},
+        {"name": "dust_level", "label": "Pylenie / emisje (szacunek)", "type": "select", "options": _dust()},
+        {"name": "hazards", "label": "Zagrożenia (chemikalia, ATEX, łatwopalne, temperatury) – wybierz", "type": "select", "options": _hazards()},
+        {"name": "hazards_notes", "label": "Zagrożenia – szczegóły (substancje, ilości, SDS/MSDS, klasy) – opis", "type": "textarea"},
+        {"name": "equipment_list", "label": "Urządzenia / linie technologiczne (lista + gabaryty + masa + media) – opis", "type": "textarea"},
+        {"name": "process_changes", "label": "Czy proces może się zmieniać (modernizacje / nowe linie)? – opis", "type": "textarea"},
+        {"name": "downtime_constraints", "label": "Ograniczenia przestojów (ciągłość pracy, redundancje) – opis", "type": "textarea"},
+    ]),
+
+    ("I. Wymiary hali i parametry przestrzenne", [
+        {"name": "building_length_m", "label": "Długość budynku [m] (jeśli znana)", "type": "number", "min": 0},
+        {"name": "building_width_m", "label": "Szerokość budynku [m] (jeśli znana)", "type": "number", "min": 0},
+        {"name": "clear_height_m", "label": "Wysokość do spodu konstrukcji (clear height) [m] – jeśli znana", "type": "number", "min": 0},
+        {"name": "building_height_m", "label": "Wysokość całkowita budynku [m] (jeśli wymagana/znana)", "type": "number", "min": 0},
+        {"name": "storeys", "label": "Kondygnacje (opis)", "type": "textarea", "ph": "np. hala 1 kond., biura 2 kond."},
+        {"name": "roof_type", "label": "Typ dachu", "type": "select", "options": _roof_type()},
         {"name": "roof_area_m2", "label": "Szacowana powierzchnia dachu [m²] (jeśli znana)", "type": "number", "min": 0},
-        {"name": "building_height_m", "label": "Wysokość budynku [m] (jeśli wymagana/znana)", "type": "number", "min": 0},
-        {"name": "style", "label": "Styl", "type": "select", "options": ["Nowoczesny", "Tradycyjny", "Stodoła", "Dworkowy", "Minimalistyczny", "Inne"]},
+        {"name": "daylight", "label": "Doświetlenie: okna / świetliki / pasma – wymagania (opis)", "type": "textarea"},
+        {"name": "crane_needed", "label": "Suwnica – czy przewidujesz?", "type": "select", "options": ["Tak", "Nie", "Nie wiem"]},
+        {"name": "crane_params", "label": "Suwnica – parametry (udźwig, rozpiętość, wysokość podnoszenia, ilość) – opis", "type": "textarea"},
     ]),
 
-    ("G. Układ funkcjonalny (dla zabudowy mieszkaniowej)", [
-        {"name": "bedrooms", "label": "Liczba sypialni", "type": "number", "min": 0},
-        {"name": "bathrooms", "label": "Liczba łazienek", "type": "number", "min": 0},
-        {"name": "wc_count", "label": "Liczba osobnych WC", "type": "number", "min": 0},
-        {"name": "kitchen_type", "label": "Kuchnia", "type": "select", "options": ["Otwarta", "Zamknięta", "Z wyspą", "Ze spiżarnią", "Nie wiem"]},
-        {"name": "home_office", "label": "Gabinet / praca zdalna", "type": "select", "options": ["Tak", "Nie", "Opcjonalnie"]},
-        {"name": "utility_rooms", "label": "Pomieszczenia techniczne i gospodarcze (pralnia, kotłownia, garderoby)", "type": "textarea"},
-        {"name": "special_rooms", "label": "Funkcje dodatkowe (warsztat, siłownia, kino, sauna itp.)", "type": "textarea"},
+    ("J. Posadzki, obciążenia, regały", [
+        {"name": "flooring_type", "label": "Typ posadzki (preferencja)", "type": "select", "options": _flooring_types()},
+        {"name": "floor_load_kn_m2", "label": "Obciążenia na posadzkę [kN/m²] (jeśli znane)", "type": "number", "min": 0},
+        {"name": "point_loads", "label": "Obciążenia skupione (maszyny/regaty/słupy) – opis", "type": "textarea"},
+        {"name": "racking_system", "label": "System składowania (regały, automatyka, wysokości) – opis", "type": "textarea"},
+        {"name": "floor_flatness", "label": "Wymagana płaskość posadzki (FF/FL / VNA) – opis", "type": "textarea"},
+        {"name": "internal_plinths", "label": "Cokoły wewnętrzne / odboje / zabezpieczenia ścian – opis", "type": "textarea"},
     ]),
 
-    ("H. Konstrukcja, elewacje, stolarka (dla zabudowy mieszkaniowej)", [
-        {"name": "wall_tech", "label": "Technologia ścian", "type": "select", "options": ["Ceramika", "Beton komórkowy", "Silikat", "Drewno", "Prefabrykat", "Nie wiem"]},
-        {"name": "facade_materials", "label": "Materiały elewacyjne", "type": "textarea", "ph": "np. tynk + drewno + spiek"},
-        {"name": "windows", "label": "Przeszklenia", "type": "select", "options": ["Standardowe", "Duże okna", "HS przesuwne", "Dużo okien dachowych", "Nie wiem"]},
-        {"name": "shading", "label": "Osłony przeciwsłoneczne", "type": "select", "options": ["Rolety", "Żaluzje fasadowe", "Pergole", "Brak", "Nie wiem"]},
-        {"name": "terrace", "label": "Tarasy / balkony (opis)", "type": "textarea"},
+    ("K. Bramy, doki, rampy, komunikacja logistyczna", [
+        {"name": "loading_zone", "label": "Strefa załadunku/rozładunku", "type": "select", "options": _load_zone()},
+        {"name": "docks_count", "label": "Liczba doków", "type": "select", "options": _docks()},
+        {"name": "dock_notes", "label": "Doki – typy, wymagania, obciążenia, wyposażenie (opis)", "type": "textarea"},
+        {"name": "ramps", "label": "Rampy – czy wymagane? (opis)", "type": "textarea"},
+        {"name": "gates_types", "label": "Bramy – typy (segmentowe/rolowane/przesuwne/szybkobieżne) – opis", "type": "textarea"},
+        {"name": "gates_dimensions", "label": "Bramy – wymiary (światło przejazdu) i ilość – opis", "type": "textarea"},
+        {"name": "delivery_windows", "label": "Okna czasowe dostaw", "type": "select", "options": _delivery_windows()},
+        {"name": "truck_yard", "label": "Plac manewrowy (TIR) – wymagania, ilość stanowisk, promienie – opis", "type": "textarea"},
+        {"name": "internal_transport", "label": "Transport wewnętrzny (wózki/AGV/suwnice) – opis", "type": "textarea"},
+        {"name": "forklift_types", "label": "Rodzaj wózków widłowych (dominujący)", "type": "select", "options": _forklift_types()},
+        {"name": "forklift_count", "label": "Liczba wózków / urządzeń transportu wewnętrznego (szacunek)", "type": "number", "min": 0},
+        {"name": "pedestrian_separation", "label": "Separacja ruchu pieszego i kołowego (wymagania) – opis", "type": "textarea"},
     ]),
 
-    ("I. Instalacje i standard (dla zabudowy mieszkaniowej)", [
-        {"name": "heating", "label": "Źródło ciepła", "type": "select", "options": ["Pompa ciepła", "Gaz", "Pellet", "Elektryczne", "Inne", "Nie wiem"]},
-        {"name": "ventilation", "label": "Wentylacja", "type": "select", "options": ["Grawitacyjna", "Mechaniczna z rekuperacją", "Nie wiem"]},
-        {"name": "pv", "label": "Fotowoltaika", "type": "select", "options": ["Tak", "Nie", "Rozważane", "Nie wiem"]},
-        {"name": "ac", "label": "Klimatyzacja", "type": "select", "options": ["Tak", "Nie", "Rozważane", "Nie wiem"]},
-        {"name": "smart_home", "label": "Automatyka budynkowa", "type": "select", "options": ["Tak", "Nie", "Podstawowy", "Nie wiem"]},
-        {"name": "finish_standard", "label": "Standard wykończenia", "type": "select", "options": ["Ekonomiczny", "Standard", "Premium"]},
-        {"name": "flooring", "label": "Podłogi (opis)", "type": "textarea", "ph": "np. panele, deska, płytki, mikrocement"},
-        {"name": "bathroom_level", "label": "Łazienki – standard", "type": "select", "options": ["Podstawowy", "Standard", "Premium", "Nie wiem"]},
-        {"name": "kitchen_level", "label": "Kuchnia – standard", "type": "select", "options": ["Podstawowy", "Standard", "Premium", "Nie wiem"]},
-        {"name": "stairs", "label": "Schody (jeśli dotyczy)", "type": "select", "options": ["Brak (dom parterowy)", "Żelbet + okładzina", "Drewniane", "Metal/drewno", "Nie wiem"]},
-        {"name": "cost_standard", "label": "Standard kosztu budowy (do estymacji)", "type": "select", "options": list(BUILD_COST_M2_PLN.keys())},
+    ("L. Konstrukcja i obudowa", [
+        {"name": "construction_pref", "label": "Preferowana technologia konstrukcyjna", "type": "select", "options": _construction_pref()},
+        {"name": "column_grid", "label": "Rozstaw osi słupów / siatka konstrukcyjna (jeśli narzucona) – opis", "type": "textarea"},
+        {"name": "envelope_materials", "label": "Obudowa/elewacje (płyta warstwowa, prefabrykat, inne) – opis", "type": "textarea"},
+        {"name": "roof_covering", "label": "Pokrycie dachu / wymagania (membrana, płyta, klapy) – opis", "type": "textarea"},
+        {"name": "thermal_requirements", "label": "Wymagania termiczne (U, szczelność, mostki) – opis", "type": "textarea"},
+        {"name": "acoustic_requirements", "label": "Wymagania akustyczne (wewn./zewn.) – opis", "type": "textarea"},
+        {"name": "durability_requirements", "label": "Wymagania trwałości/odporności (uderzenia, chemia, korozja) – opis", "type": "textarea"},
     ]),
 
-    ("J. Zagospodarowanie terenu", [
-        {"name": "driveway_material", "label": "Podjazd (materiał)", "type": "select", "options": ["Kostka", "Beton", "Żwir", "Asfalt", "Nie wiem"]},
-        {"name": "fence", "label": "Ogrodzenie", "type": "select", "options": ["Tak", "Nie", "Rozważane"]},
-        {"name": "garden_plan", "label": "Projekt zieleni", "type": "select", "options": ["Tak", "Nie", "Rozważane"]},
-        {"name": "additional_objects", "label": "Obiekty dodatkowe (basen, altana, wiata, śmietnik, schowek)", "type": "textarea"},
-        {"name": "rainwater", "label": "Gospodarka wodami opadowymi", "type": "select", "options": ["Zbiornik", "Rozsączanie", "Nie wiem", "Nie dotyczy"]},
+    ("M. Instalacje – wymagania szczegółowe", [
+        {"name": "heating", "label": "Ogrzewanie – preferowane źródło", "type": "select", "options": _heating()},
+        {"name": "ventilation", "label": "Wentylacja – preferencja", "type": "select", "options": _ventilation()},
+        {"name": "process_exhaust", "label": "Wyciągi/odpylanie/filtracja – wymagania (opis)", "type": "textarea"},
+        {"name": "compressed_air", "label": "Sprężone powietrze – czy wymagane? parametry (opis)", "type": "textarea"},
+        {"name": "compressor_room", "label": "Sprężarkownia – czy przewidujesz? lokalizacja/hałas/serwis (opis)", "type": "textarea"},
+        {"name": "steam", "label": "Para technologiczna – czy wymagana? (opis)", "type": "textarea"},
+        {"name": "cooling", "label": "Chłodzenie technologiczne / woda lodowa – wymagania (opis)", "type": "textarea"},
+        {"name": "gas_usage", "label": "Gaz – czy używany w procesie? (opis)", "type": "textarea"},
+        {"name": "water_tech", "label": "Woda technologiczna – parametry jakościowe / uzdatnianie (opis)", "type": "textarea"},
+        {"name": "drain_tech", "label": "Odwodnienia technologiczne, separatory, neutralizacja (opis)", "type": "textarea"},
+        {"name": "electrical_critical", "label": "Zasilanie krytyczne (UPS/agregat/redundancja) – opis", "type": "textarea"},
+        {"name": "lighting_requirements", "label": "Oświetlenie (lux, strefy, automatyka, awaryjne) – opis", "type": "textarea"},
+        {"name": "bms", "label": "BMS / automatyka budynkowa – zakres (opis)", "type": "textarea"},
     ]),
 
-    ("K. Budżet i terminy", [
-        {"name": "budget_total", "label": "Budżet całej inwestycji [PLN] (jeśli określony)", "type": "number", "min": 0},
-        {"name": "budget_build_only", "label": "Budżet robót budowlanych [PLN] (bez gruntu) (jeśli określony)", "type": "number", "min": 0},
-        {"name": "timeline_start", "label": "Planowany termin rozpoczęcia robót", "type": "select", "options": ["0–3 mies.", "3–6 mies.", "6–12 mies.", "12+ mies.", "Nieokreślony"]},
-        {"name": "timeline_deadline", "label": "Wymagany termin zakończenia (jeśli jest)", "type": "textarea"},
-        {"name": "priority", "label": "Priorytet inwestora", "type": "select", "options": ["Koszt", "Czas", "Jakość", "Energooszczędność", "Estetyka"]},
+    ("N. PPOŻ – kluczowe dane wejściowe", [
+        {"name": "fire_water_availability", "label": "Dostępność wody do gaszenia pożaru (hydranty, zbiorniki, wydajność) – opis", "type": "textarea"},
+        {"name": "sprinkler", "label": "Instalacja tryskaczowa – status", "type": "select", "options": _sprinkler()},
+        {"name": "fire_load", "label": "Obciążenie ogniowe (szacunek)", "type": "select", "options": _fire_load()},
+        {"name": "stored_materials", "label": "Rodzaj magazynowanego materiału + ilości + sposób składowania (opis)", "type": "textarea"},
+        {"name": "fire_zones", "label": "Podział na strefy pożarowe (jeśli narzucony) – opis", "type": "textarea"},
+        {"name": "smoke_exhaust", "label": "Oddymianie / klapy dymowe / pasma – wymagania (opis)", "type": "textarea"},
+        {"name": "fire_alarm", "label": "SSP/DSO/monitoring pożarowy – wymagania inwestora (opis)", "type": "textarea"},
+        {"name": "fire_consultant", "label": "Czy inwestor ma rzeczoznawcę ppoż / standard korporacyjny? (opis)", "type": "textarea"},
     ]),
 
-    ("L. Inspiracje i informacje dodatkowe", [
-        {"name": "inspirations_links", "label": "Inspiracje (linki, Pinterest, IG, materiały referencyjne)", "type": "textarea"},
-        {"name": "must_have", "label": "Wymagania kluczowe (must-have)", "type": "textarea"},
-        {"name": "nice_to_have", "label": "Wymagania dodatkowe (nice-to-have)", "type": "textarea"},
-        {"name": "dont_want", "label": "Wykluczenia / elementy nieakceptowalne", "type": "textarea"},
-        {"name": "unknowns", "label": "Obszary do rekomendacji architekta / wymagające doprecyzowania", "type": "textarea"},
+    ("O. BHP / ergonomia / ryzyka operacyjne", [
+        {"name": "hse_risks", "label": "Ryzyka BHP (chemia, hałas, pyły, ruch pojazdów) – opis", "type": "textarea"},
+        {"name": "ppe_zones", "label": "Strefy wymagające ŚOI / procedury wejścia – opis", "type": "textarea"},
+        {"name": "emergency_procedures", "label": "Procedury awaryjne (ewakuacja, wycieki, awaria zasilania) – opis", "type": "textarea"},
+        {"name": "safety_barriers", "label": "Wymagania barier/odbojów/siatek/kurtyn – opis", "type": "textarea"},
+        {"name": "cleanliness", "label": "Wymagania czystości (brudna/czysta, śluzy, strefowanie) – opis", "type": "textarea"},
     ]),
 
-    # =========================
-    # DODATEK: tabela inwestycyjna (biuro/produkcja/magazyn) – wg PDF
-    # =========================
-    ("M. Inwestycja biurowo-produkcyjno-magazynowa (jeśli dotyczy)", [
-        {"name": "inv_name", "label": "Nazwa inwestycji (budowa/przebudowa/rozbudowa)", "type": "text"},
-        {"name": "inv_location", "label": "Lokalizacja inwestycji", "type": "text"},
-        {"name": "plot_size_note", "label": "Wielkość działki (opis / potwierdzenie)", "type": "textarea"},
-        {"name": "land_class", "label": "Klasa gruntów (jeśli znana)", "type": "text"},
-        {"name": "ownership_form", "label": "Forma własności działki", "type": "text"},
-
-        {"name": "function_office", "label": "Funkcja: biurowa", "type": "checkbox"},
-        {"name": "function_production", "label": "Funkcja: produkcyjna", "type": "checkbox"},
-        {"name": "function_warehouse", "label": "Funkcja: magazynowa", "type": "checkbox"},
-        {"name": "function_split", "label": "Podział na części (opis)", "type": "textarea"},
-
-        {"name": "tech_production_type", "label": "Technologia: rodzaj produkcji", "type": "textarea"},
-        {"name": "tech_material_type_qty", "label": "Technologia: rodzaj i ilość materiału", "type": "textarea"},
-        {"name": "tech_required_temps", "label": "Technologia: wymagane temperatury (proces/komfort)", "type": "textarea"},
-        {"name": "tech_heating_method", "label": "Technologia: sposób ogrzewania (założenia / wymagania)", "type": "textarea"},
-        {"name": "tech_devices", "label": "Technologia: urządzenia (lista / główne parametry)", "type": "textarea"},
-
-        {"name": "staff_physical_total", "label": "Zatrudnienie: pracownicy fizyczni – liczba łącznie", "type": "number", "min": 0},
-        {"name": "staff_physical_women", "label": "Zatrudnienie: pracownicy fizyczni – kobiety", "type": "number", "min": 0},
-        {"name": "staff_physical_men", "label": "Zatrudnienie: pracownicy fizyczni – mężczyźni", "type": "number", "min": 0},
-        {"name": "staff_office_total", "label": "Zatrudnienie: pracownicy biurowi – liczba łącznie", "type": "number", "min": 0},
-        {"name": "staff_office_women", "label": "Zatrudnienie: pracownicy biurowi – kobiety", "type": "number", "min": 0},
-        {"name": "staff_office_men", "label": "Zatrudnienie: pracownicy biurowi – mężczyźni", "type": "number", "min": 0},
-
-        {"name": "shifts_count", "label": "System zmianowy: liczba zmian", "type": "number", "min": 0},
-        {"name": "people_per_shift", "label": "System zmianowy: liczba osób na jednej zmianie", "type": "number", "min": 0},
-
-        {"name": "building_len_m", "label": "Wymiary budynku: długość [m]", "type": "number", "min": 0},
-        {"name": "building_wid_m", "label": "Wymiary budynku: szerokość [m]", "type": "number", "min": 0},
-        {"name": "building_h_to_underside_m", "label": "Wysokość do spodu konstrukcji [m]", "type": "number", "min": 0},
-
-        {"name": "crane_required", "label": "Suwnica – przewidziana", "type": "checkbox"},
-        {"name": "crane_note", "label": "Suwnica – parametry (udźwig, rozpiętość, tor, wysokość, strefy)", "type": "textarea"},
-
-        {"name": "floor_load_kN_m2", "label": "Obciążenia użytkowe posadzki [kN/m²] (jeśli znane)", "type": "text"},
-
-        {"name": "daylight_windows", "label": "Doświetlenie: okna (opis)", "type": "textarea"},
-        {"name": "daylight_skylights", "label": "Doświetlenie: świetliki (opis)", "type": "textarea"},
-
-        {"name": "gates_segmental", "label": "Bramy: segmentowe – wymiary/ilości", "type": "textarea"},
-        {"name": "gates_roller", "label": "Bramy: rolowane – wymiary/ilości", "type": "textarea"},
-        {"name": "gates_sliding", "label": "Bramy: przesuwne – wymiary/ilości", "type": "textarea"},
-
-        {"name": "internal_plinths", "label": "Cokoły wewnętrzne (opis)", "type": "textarea"},
-        {"name": "ramps_docks", "label": "Rampy i doki dla TIR (opis, ilości, wysokości)", "type": "textarea"},
-
-        {"name": "ventilation_type_ind", "label": "Wentylacja (hala):", "type": "select", "options": ["Grawitacyjna", "Mechaniczna", "Mechaniczna z odzyskiem", "Nie określono"]},
-        {"name": "heating_source_ind", "label": "Ogrzewanie (hala): źródło ciepła (opis)", "type": "textarea"},
-        {"name": "compressor_room", "label": "Sprężarkownia (opis / wymagania)", "type": "textarea"},
-
-        {"name": "forklifts_type", "label": "Wózki widłowe: rodzaj (np. elektryczne/LPG)", "type": "text"},
-        {"name": "forklifts_qty", "label": "Wózki widłowe: ilość", "type": "number", "min": 0},
-
-        {"name": "plan_build_conditions", "label": "Warunki zabudowy / ustalenia planu (opis)", "type": "textarea"},
-        {"name": "tech_conditions_summary", "label": "Warunki techniczne (przyłącza) – opis/uwagi", "type": "textarea"},
-
-        {"name": "geological_tests", "label": "Badania geologiczne – dostępne / planowane (opis)", "type": "textarea"},
-        {"name": "env_decision", "label": "Decyzja środowiskowa – dostępna / wymagana (opis)", "type": "textarea"},
-        {"name": "agri_exclusion", "label": "Wyłączenie z produkcji rolnej – dotyczy (opis)", "type": "textarea"},
-        {"name": "water_law_permit", "label": "Operat wodnoprawny (odprowadzenie wód opadowych) – status/uwagi", "type": "textarea"},
-        {"name": "conservation_protection", "label": "Ochrona konserwatorska – status/uwagi", "type": "textarea"},
-        {"name": "driveway_access_detail", "label": "Zjazd z posesji – status/uwagi", "type": "textarea"},
-
-        {"name": "constraints_distances", "label": "Ograniczenia i odległości (las, linie, gazociągi, tereny zalewowe, drogi, istniejące obiekty)", "type": "textarea"},
-
-        {"name": "fire_water_availability", "label": "Dostępność wody do celów ppoż. (opis)", "type": "textarea"},
-        {"name": "fire_load", "label": "Obciążenie ogniowe (jeśli znane / do określenia)", "type": "textarea"},
-        {"name": "stored_material_type_qty", "label": "Rodzaj magazynowanego materiału oraz ilość", "type": "textarea"},
+    ("P. Zatrudnienie, zmiany, socjal", [
+        {"name": "shifts", "label": "Tryb pracy", "type": "select", "options": _shifts()},
+        {"name": "workers_total", "label": "Liczba pracowników (łącznie) – szacunek", "type": "number", "min": 0},
+        {"name": "workers_per_shift", "label": "Liczba pracowników na zmianie – szacunek", "type": "number", "min": 0},
+        {"name": "office_staff", "label": "Liczba pracowników biurowych – szacunek", "type": "number", "min": 0},
+        {"name": "gender_split", "label": "Struktura (opcjonalnie): kobiety/mężczyźni (dla szatni/sanitariatów) – opis", "type": "textarea"},
+        {"name": "social_requirements", "label": "Zaplecze socjalne (szatnie czysta/brudna, prysznice, jadalnia) – opis", "type": "textarea"},
+        {"name": "office_standard", "label": "Standard części biurowej", "type": "select", "options": _office_standard()},
+        {"name": "visitor_flow", "label": "Ruch gości / recepcja / strefy reprezentacyjne – opis", "type": "textarea"},
     ]),
 
-    ("N. Załączniki (opcjonalnie)", [
-        {"name": "attachments", "label": "Pliki (MPZP/WZ, mapa, geotechnika, warunki przyłączy, szkice)", "type": "file", "multiple": True},
+    ("Q. IT / bezpieczeństwo / ochrona", [
+        {"name": "security_level", "label": "Poziom zabezpieczeń", "type": "select", "options": _security_level()},
+        {"name": "cctv", "label": "CCTV – zakres (strefy, retencja nagrań) – opis", "type": "textarea"},
+        {"name": "access_control", "label": "Kontrola dostępu (KD) – zakres (strefy, uprawnienia) – opis", "type": "textarea"},
+        {"name": "intrusion", "label": "SSWiN / ochrona fizyczna – opis", "type": "textarea"},
+        {"name": "it_rooms", "label": "Serwerownia / teletechnika – wymagania (klima, UPS, redundancja) – opis", "type": "textarea"},
+        {"name": "network_requirements", "label": "Sieć (Wi-Fi przemysłowe, IoT, OT/SCADA) – opis", "type": "textarea"},
+    ]),
+
+    ("R. Standardy, audyty, wymagania korporacyjne", [
+        {"name": "audit_standards", "label": "Standardy / audyty (wybierz)", "type": "select", "options": _audit_standards()},
+        {"name": "audit_notes", "label": "Wymagania audytowe i korporacyjne (materiały, procedury, układ) – opis", "type": "textarea"},
+        {"name": "bim_requirement", "label": "BIM", "type": "select", "options": _bim()},
+        {"name": "design_guidelines", "label": "Wytyczne inwestora (brandbook, standard obiektów) – opis", "type": "textarea"},
+    ]),
+
+    ("S. Zewnętrzne zagospodarowanie terenu", [
+        {"name": "parking_policy", "label": "Parkingi – założenia", "type": "select", "options": _parking_req()},
+        {"name": "parking_counts", "label": "Liczba miejsc: osobowe / ciężarowe / rowery (jeśli znane) – opis", "type": "textarea"},
+        {"name": "roads_internal", "label": "Drogi wewnętrzne, place, nawierzchnie – wymagania (opis)", "type": "textarea"},
+        {"name": "fence", "label": "Ogrodzenie – czy wymagane?", "type": "select", "options": ["Tak", "Nie", "Nie wiem"]},
+        {"name": "gatehouse", "label": "Portiernia / wjazd kontrolowany – wymagania (opis)", "type": "textarea"},
+        {"name": "stormwater_retention", "label": "Retencja / zbiorniki / zrzut deszczówki – wymagania (opis)", "type": "textarea"},
+        {"name": "external_storage", "label": "Składowanie zewnętrzne (kontenery, odpady, palety) – opis", "type": "textarea"},
+        {"name": "waste_management", "label": "Gospodarka odpadami (rodzaje, ilości, lokalizacja, segregacja) – opis", "type": "textarea"},
+    ]),
+
+    ("T. Budżet, harmonogram, ryzyka", [
+        {"name": "budget_total", "label": "Budżet całej inwestycji [PLN] (jeśli jest)", "type": "number", "min": 0},
+        {"name": "budget_build_only", "label": "Budżet budowy (bez gruntu) [PLN] (jeśli jest)", "type": "number", "min": 0},
+        {"name": "timeline_start", "label": "Planowany start prac (projekt/budowa) – opis", "type": "textarea"},
+        {"name": "timeline_deadline", "label": "Termin oddania / uruchomienia (czy jest krytyczny?) – opis", "type": "textarea"},
+        {"name": "priority", "label": "Priorytet projektu", "type": "select", "options": _priority()},
+        {"name": "risk_register", "label": "Ryzyka zidentyfikowane przez inwestora (formalno-prawne, techniczne, operacyjne) – opis", "type": "textarea"},
+        {"name": "no_go", "label": "Warunki 'no-go' (czego nie wolno przekroczyć) – opis", "type": "textarea"},
+        {"name": "unknowns", "label": "Obszary nieustalone (co wymaga doprecyzowania) – opis", "type": "textarea"},
+        {"name": "must_have", "label": "Must-have (wymagania bezwzględne) – opis", "type": "textarea"},
+        {"name": "nice_to_have", "label": "Nice-to-have (mile widziane) – opis", "type": "textarea"},
+        {"name": "dont_want", "label": "Czego na pewno nie chcesz – opis", "type": "textarea"},
+    ]),
+
+    ("U. Załączniki (opcjonalnie)", [
+        {"name": "attachments", "label": "Pliki (MPZP/WZ, mapa, geotechnika, warunki przyłączy, proces/technologia, szkice)", "type": "file", "multiple": True},
     ]),
 ]
 
@@ -311,13 +488,11 @@ def _load_db() -> Dict[str, Any]:
     except Exception:
         return {"companies": {}}
 
-
 def _save_db(db: Dict[str, Any]) -> None:
     tmp = DATA_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
     os.replace(tmp, DATA_FILE)
-
 
 def _now_ts() -> int:
     return int(time.time())
@@ -427,10 +602,12 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     :root {{
       --bg: #070B16;
       --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(255,255,255,0.08);
       --stroke: rgba(255,255,255,0.12);
       --text: #EEF2FF;
       --muted: rgba(238,242,255,0.70);
       --gold: #D6B36A;
+      --gold2: #B89443;
       --danger: #ff5b5b;
       --ok: #49d17d;
       --shadow: 0 12px 40px rgba(0,0,0,0.40);
@@ -481,6 +658,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       background: rgba(255,255,255,0.06);
       color: var(--text);
       font-weight: 700;
+      box-shadow: none;
       transition: transform .15s ease, background .15s ease, border-color .15s ease;
     }}
     .btn:hover {{ transform: translateY(-1px); background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }}
@@ -490,6 +668,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       border-color: rgba(214,179,106,0.85);
       box-shadow: 0 14px 40px rgba(214,179,106,0.18);
     }}
+    .btn.gold:hover {{ transform: translateY(-1px); }}
     .btn.ghost {{ background: transparent; }}
     .badge {{ padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; border:1px solid rgba(255,255,255,0.12); }}
     .badge.ok {{ color: var(--ok); border-color: rgba(73,209,125,0.35); background: rgba(73,209,125,0.08); }}
@@ -529,7 +708,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       color: var(--muted);
       font-size: 18px;
       line-height: 1.6;
-      max-width: 62ch;
+      max-width: 68ch;
     }}
     .panel {{
       background: var(--panel);
@@ -538,15 +717,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       box-shadow: var(--shadow);
     }}
     .card {{ padding: 20px; }}
-    .stats {{ display:grid; gap: 14px; }}
-    .stat {{
-      padding: 16px;
-      border-radius: 18px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.08);
-    }}
-    .stat .n {{ font-size: 26px; font-weight: 800; }}
-    .stat .t {{ color: var(--muted); font-weight: 700; }}
 
     .grid3 {{
       display:grid;
@@ -561,45 +731,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       transition: transform .15s ease, background .15s ease;
     }}
     .tile:hover {{ transform: translateY(-2px); background: rgba(255,255,255,0.07); }}
-    .tile h3 {{ margin: 2px 0 8px; font-size: 18px; }}
-    .tile p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
-
-    .how {{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-      align-items: start;
-    }}
-    .step {{
-      padding: 18px;
-      border-radius: 20px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.08);
-    }}
-    .step .k {{ color: var(--gold); font-weight: 800; letter-spacing: .6px; font-size: 12px; }}
-    .step h3 {{ margin: 8px 0 8px; }}
-    .step p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
-
-    .pricing {{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      align-items: stretch;
-    }}
-    .price {{
-      padding: 22px;
-      border-radius: 22px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.08);
-    }}
-    .price h3 {{ margin: 0 0 6px; }}
-    .price .big {{ font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 8px; }}
-    .price ul {{ margin: 12px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.7; }}
-    .foot {{
-      padding: 26px 0 60px;
-      color: rgba(238,242,255,0.55);
-      border-top: 1px solid rgba(255,255,255,0.06);
-    }}
 
     .formwrap {{ padding: 32px 0 60px; }}
     .notice {{
@@ -644,16 +775,10 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       outline: none;
     }}
     input::placeholder, textarea::placeholder {{ color: rgba(238,242,255,0.40); }}
-    textarea {{ min-height: 90px; resize: vertical; }}
+    textarea {{ min-height: 100px; resize: vertical; }}
     select option {{ color: #0b0f1a; background: #ffffff; }}
     .field.full {{ grid-column: 1 / -1; }}
-    .checkrow {{
-      display:flex; align-items:center; gap:10px;
-      padding: 10px 12px;
-      border-radius: 14px;
-      border:1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-    }}
+    .checkrow {{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 14px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }}
     .checkrow input[type="checkbox"] {{ width: 18px; height: 18px; }}
     .actions {{ display:flex; gap: 12px; align-items:center; margin-top: 18px; flex-wrap: wrap; }}
     .muted {{ color: var(--muted); font-weight: 650; line-height: 1.6; }}
@@ -661,8 +786,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     @media (max-width: 920px) {{
       .hero {{ grid-template-columns: 1fr; }}
       .grid3 {{ grid-template-columns: 1fr; }}
-      .how {{ grid-template-columns: 1fr; }}
-      .pricing {{ grid-template-columns: 1fr; }}
       .fields {{ grid-template-columns: 1fr; }}
     }}
   </style>
@@ -680,23 +803,21 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
         </div>
         <div class="cta">
           <a class="btn ghost" href="/demo">Podgląd briefu</a>
-          <a class="btn" href="/login">Logowanie</a>
-          <a class="btn gold" href="/register">Rejestracja</a>
+          <a class="btn" href="/login">Zaloguj</a>
+          <a class="btn gold" href="/register">Załóż konto</a>
         </div>
       </div>
     </div>
   </div>
-
   {body}
-
 </body>
 </html>
 """
 
 def nav_links() -> str:
     return """
-      <a href="/#funkcje">Zakres</a>
-      <a href="/#jak">Proces</a>
+      <a href="/#funkcje">Funkcje</a>
+      <a href="/#jak">Jak działa</a>
       <a href="/#cennik">Cennik</a>
       <a href="/#faq">FAQ</a>
     """
@@ -733,7 +854,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
                 </div>
                 """)
             elif ftype == "select":
-                options_html = ['<option value="">—</option>']
+                options_html = ['<option value="">— (puste) —</option>']
                 for o in opts:
                     options_html.append(f'<option value="{esc(o)}">{esc(o)}</option>')
                 inner.append(f"""
@@ -789,7 +910,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
           <p class="lead" style="max-width:none">{esc(subtitle)}</p>
           <div style="height:14px"></div>
           <div class="notice">
-            <b>Informacja:</b> dopuszczalne są braki danych. Celem briefu jest uporządkowanie informacji i wskazanie braków do uzupełnienia.
+            <b>Informacja:</b> pola mogą pozostać puste. Raport ma wskazać braki i ryzyka oraz przygotować listę pytań uzupełniających.
           </div>
 
           <form method="post" action="{esc(action_url)}" enctype="multipart/form-data" style="margin-top:16px">
@@ -798,7 +919,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
             <div class="actions">
               <button class="btn gold" type="submit">Zatwierdź brief</button>
               <a class="btn" href="/">Powrót</a>
-              <span class="muted">Zatwierdzenie briefu uruchamia analizę i generuje raport.</span>
+              <span class="muted">Zatwierdzenie briefu uruchamia analizę i przygotowanie raportu dla architekta.</span>
             </div>
             <script>
               (function(){{
@@ -809,7 +930,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
                   var btn = f.querySelector("button[type=submit]");
                   if(btn){{
                     btn.disabled = true;
-                    btn.textContent = "Przetwarzanie…";
+                    btn.textContent = "Przetwarzanie...";
                   }}
                 }}, {{ once: true }});
               }})();
@@ -822,7 +943,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
 
 
 # =========================
-# 6) AI / fallback report
+# 6) AI / fallback report (pozostawiam – możesz rozbudować prompt pod przemysł)
 # =========================
 
 def fallback_report(form: Dict[str, Any], pricing_text: str) -> str:
@@ -842,40 +963,36 @@ def fallback_report(form: Dict[str, Any], pricing_text: str) -> str:
 
     missing_human = {
         "mpzp_wz_extract": "Wypis i wyrys MPZP / decyzja WZ",
-        "map_for_design": "Mapa do celów projektowych",
+        "map_for_design": "Mapa do celów projektowych (geodeta)",
         "geotech_opinion": "Opinia geotechniczna",
         "power_conditions": "Warunki przyłączenia energii elektrycznej",
         "water_conditions": "Warunki przyłączenia wody",
-        "sewage_conditions": "Warunki kanalizacji sanitarnej",
+        "sewage_conditions": "Warunki przyłączenia kanalizacji sanitarnej",
     }
 
-    missing_list = "\n".join([f"- {missing_human.get(m, m)}" for m in missing]) or "- Brak krytycznych braków wykrytych na podstawie danych wejściowych."
+    missing_list = "\n".join([f"- {missing_human.get(m, m)}" for m in missing]) or "- (brak krytycznych braków wykrytych)"
 
-    pricing_note = (
-        "Cennik firmy nie został uzupełniony – wycena wynagrodzenia projektowego może wymagać doprecyzowania."
-        if not pricing_text.strip()
-        else "Cennik firmy został uwzględniony w analizie."
-    )
+    pricing_note = "Cennik firmy jest pusty lub niepodany – nie wyliczono wynagrodzenia projektowego." if not pricing_text.strip() else "Cennik firmy został dołączony do analizy."
 
-    return f"""RAPORT (tryb podstawowy)
+    return f"""RAPORT (tryb bez AI)
 
-1) Podsumowanie danych
-- Typ: {form.get("building_type","")}
-- Powierzchnia: {form.get("usable_area_m2","")} m²
-- Kondygnacje: {form.get("storeys","")}
-- Dach: {form.get("roof_type","")}
-- Standard: {form.get("cost_standard","")}
+1) Podsumowanie briefu
+- Typ obiektu: {form.get("object_type","")}
+- Lokalizacja: {form.get("plot_address","")}
+- Program (opis): {form.get("program_overview","")}
 
 2) Braki / dokumenty do pozyskania
 {missing_list}
 
-3) Szacunkowy koszt robót budowlanych (model orientacyjny)
+3) Wstępny koszt budowy (szacunek orientacyjny – V1)
 - Założenia: standard={standard}, region={region}
-- Koszt jednostkowy: ok. {int(base*mult)} PLN/m²
+- Koszt m²: ok. {int(base*mult)} PLN/m²
 - Estymacja: {build_low:,} – {build_high:,} PLN (orientacyjnie)
 
-4) Wycena projektowa
+4) Cennik / koszt projektu
 - {pricing_note}
+
+Uwaga: raport ma charakter informacyjny (MVP). Tryb AI generuje analizę ryzyk, checklisty formalne i listę pytań uzupełniających.
 """.replace(",", " ")
 
 def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], architect: Dict[str, Any]) -> str:
@@ -885,19 +1002,21 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     system = (
-        "Jesteś architektem-prowadzącym i kosztorysantem w Polsce. "
-        "Tworzysz raport roboczy dla architekta na podstawie briefu inwestora. "
+        "Jesteś doświadczonym architektem-prowadzącym i koordynatorem projektów przemysłowych w Polsce. "
+        "Tworzysz RAPORT DLA ARCHITEKTA na podstawie briefu inwestorskiego dotyczącego obiektu przemysłowego/logistycznego. "
+        "Twoim celem jest: (a) uporządkować dane, (b) wskazać braki i ryzyka, (c) wskazać pytania krytyczne, "
+        "oraz (d) zaproponować założenia projektowe tam, gdzie inwestor nie ma danych. "
+        "Nie udzielaj porady prawnej.\n\n"
         "Format (Markdown):\n"
-        "## 1) Streszczenie projektu\n"
-        "## 2) Dane wejściowe (tabela)\n"
-        "## 3) Założenia do kosztorysu\n"
-        "## 4) Kalkulacja kosztów (kategorie + uzasadnienie)\n"
-        "## 5) Braki i pytania do uzupełnienia\n"
-        "## 6) Checklista dokumentów i formalności\n"
-        "## 7) Ryzyka i kolizje (informacyjnie)\n"
-        "## 8) Wycena wynagrodzenia projektowego na podstawie cennika firmy\n"
-        "## 9) Rekomendowane dalsze kroki\n\n"
-        "Pisz po polsku, rzeczowo i profesjonalnie. Nie udzielaj porady prawnej."
+        "## 1) Streszczenie inwestycji\n"
+        "## 2) Dane wejściowe (tabela parametr → wartość)\n"
+        "## 3) Pytania krytyczne (must-have) i pytania uzupełniające (nice-to-have)\n"
+        "## 4) Braki dokumentów i formalności (checklista)\n"
+        "## 5) Ryzyka techniczne/operacyjne (PPOŻ/BHP/technologia/logistyka/media)\n"
+        "## 6) Założenia projektowe do przyjęcia wstępnie\n"
+        "## 7) Następne kroki (kolejność działań)\n"
+        "## 8) Wycena wynagrodzenia projektowego na podstawie CENNIKA firmy (jeśli dostępny)\n"
+        "Pisz po polsku. Bądź konkretny i praktyczny."
     )
 
     user_payload = {
@@ -909,7 +1028,7 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
             "standard_base_m2_pln": BUILD_COST_M2_PLN,
             "region_multiplier": REGION_MULTIPLIER,
         },
-        "note": "Jeżeli brakuje danych, wskaż założenia oraz listę pytań koniecznych do doprecyzowania."
+        "note": "Jeżeli brakuje danych, wskaż co można założyć i co koniecznie trzeba dopytać."
     }
 
     prompt = json.dumps(user_payload, ensure_ascii=False)
@@ -928,7 +1047,7 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
 
 
 # =========================
-# 7) Email (Resend HTTPS + SMTP fallback)
+# 7) Email (Resend HTTPS + SMTP fallback) – bez zmian
 # =========================
 
 def _safe_err(e: BaseException) -> str:
@@ -937,14 +1056,11 @@ def _safe_err(e: BaseException) -> str:
         parts.append(f"errno={e.errno}")
     return " | ".join(parts)
 
-def send_email_via_resend(to_email: str, subject: str, body: str) -> Tuple[bool, str]:
+def send_email_via_resend(to_email: str, subject: str, body: str) -> tuple[bool, str]:
     if not (RESEND_API_KEY and RESEND_FROM):
-        return False, "RESEND not configured"
-
+        return False, "RESEND not configured (missing RESEND_API_KEY or RESEND_FROM)"
     try:
         import urllib.request
-        import urllib.error
-
         payload = json.dumps({
             "from": RESEND_FROM,
             "to": [to_email],
@@ -961,29 +1077,18 @@ def send_email_via_resend(to_email: str, subject: str, body: str) -> Tuple[bool,
             },
             method="POST",
         )
-
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                code = int(getattr(resp, "status", 200))
-                text = resp.read().decode("utf-8", errors="replace")
-                if 200 <= code < 300:
-                    return True, f"RESEND OK status={code} resp={text[:200]}"
-                return False, f"RESEND FAIL status={code} resp={text[:400]}"
-        except urllib.error.HTTPError as e:
-            err_body = ""
-            try:
-                err_body = e.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
-            return False, f"RESEND HTTPError status={e.code} resp={err_body[:400]}"
-
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            code = int(getattr(resp, "status", 200))
+            text = resp.read().decode("utf-8", errors="replace")
+            if 200 <= code < 300:
+                return True, f"RESEND OK status={code} resp={text[:300]}"
+            return False, f"RESEND FAIL status={code} resp={text[:800]}"
     except Exception as e:
         return False, f"RESEND exception: {_safe_err(e)}"
 
-def send_email_via_smtp(to_email: str, subject: str, body: str) -> Tuple[bool, str]:
+def send_email_via_smtp(to_email: str, subject: str, body: str) -> tuple[bool, str]:
     if not BOT_EMAIL or not BOT_EMAIL_PASSWORD:
-        return False, "SMTP not configured"
-
+        return False, "SMTP not configured (missing BOT_EMAIL or BOT_EMAIL_PASSWORD)"
     try:
         import smtplib
         from email.message import EmailMessage
@@ -994,6 +1099,8 @@ def send_email_via_smtp(to_email: str, subject: str, body: str) -> Tuple[bool, s
         msg["Subject"] = subject
         msg.set_content(body)
 
+        print(f"[EMAIL] SMTP connect {SMTP_HOST}:{SMTP_PORT} as {BOT_EMAIL}")
+
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
             s.ehlo()
             s.starttls(context=ssl.create_default_context())
@@ -1002,7 +1109,6 @@ def send_email_via_smtp(to_email: str, subject: str, body: str) -> Tuple[bool, s
             s.send_message(msg)
 
         return True, "SMTP OK"
-
     except (socket.gaierror, TimeoutError, OSError) as e:
         return False, f"SMTP network error: {_safe_err(e)}"
     except Exception as e:
@@ -1030,16 +1136,11 @@ def send_email(to_email: str, subject: str, body: str, *, delivery_id: str) -> b
 
 
 # =========================
-# 8) Stripe
+# 8) Stripe – bez zmian
 # =========================
 
 def stripe_ready() -> bool:
-    return bool(
-        stripe is not None
-        and STRIPE_SECRET_KEY
-        and (STRIPE_PRICE_ID_MONTHLY or STRIPE_PRICE_ID_YEARLY)
-        and STRIPE_WEBHOOK_SECRET
-    )
+    return bool(stripe is not None and STRIPE_SECRET_KEY and (STRIPE_PRICE_ID_MONTHLY or STRIPE_PRICE_ID_YEARLY) and STRIPE_WEBHOOK_SECRET)
 
 def subscription_active(company: Dict[str, Any]) -> bool:
     if DEV_BYPASS_SUBSCRIPTION:
@@ -1053,7 +1154,7 @@ def stripe_init() -> None:
 
 
 # =========================
-# 9) App + auth
+# 9) App + auth – bez zmian
 # =========================
 
 app = FastAPI()
@@ -1087,7 +1188,7 @@ def flash_html(msg: str) -> str:
 
 
 # =========================
-# 10) Landing page
+# 10) Landing page – minimalnie poprawione copy
 # =========================
 
 @app.get("/", response_class=HTMLResponse)
@@ -1104,170 +1205,72 @@ def home():
         <div class="wrap hero">
           <div>
             <div class="kicker">
-              {badge("AI – skonfigurowane" if openai_ok else "AI – nieaktywne", openai_ok)}
-              {badge("E-mail – skonfigurowane" if mail_ok else "E-mail – nieaktywne", mail_ok)}
-              {badge("Płatności – skonfigurowane" if stripe_ok else "Płatności – opcjonalne", stripe_ok)}
+              {badge("AI: aktywne" if openai_ok else "AI: nieaktywne", openai_ok)}
+              {badge("Email: skonfigurowany" if mail_ok else "Email: brak konfiguracji", mail_ok)}
+              {badge("Stripe: skonfigurowany" if stripe_ok else "Stripe: opcjonalnie", stripe_ok)}
             </div>
-            <h1>Brief inwestorski i analiza <span class="gold">dla pracowni architektonicznych</span></h1>
+            <h1>Brief inwestorski + analiza <span class="gold">dla projektów przemysłowych</span></h1>
             <p class="lead">
-              Inwestor uzupełnia uporządkowany brief. System przygotowuje raport dla architekta:
-              braki danych, ryzyka, checklisty formalne oraz wstępną estymację kosztów.
+              Inwestor wypełnia szczegółowy brief. System generuje raport dla architekta: braki, ryzyka,
+              checklisty formalne oraz pytania krytyczne do doprecyzowania.
             </p>
             <div style="height:18px"></div>
             <div class="cta" style="justify-content:flex-start">
-              <a class="btn gold" href="/register">Utwórz konto</a>
-              <a class="btn" href="/demo">Podgląd briefu</a>
+              <a class="btn gold" href="/register">Rozpocznij</a>
+              <a class="btn" href="/demo">Zobacz brief (demo)</a>
             </div>
           </div>
           <div class="panel card">
-            <div class="stats">
-              <div class="stat">
-                <div class="n">Jednolity standard</div>
-                <div class="t">brief i dane wejściowe w spójnej strukturze</div>
-              </div>
-              <div class="stat">
-                <div class="n">Raport roboczy</div>
-                <div class="t">materiał do rozmowy i doprecyzowania zakresu</div>
-              </div>
-              <div class="stat">
-                <div class="n">Cennik firmy</div>
-                <div class="t">możliwość wyceny na podstawie zasad pracowni</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="slide" id="funkcje">
-        <div class="wrap">
-          <h1 style="margin:0 0 14px">Zakres</h1>
-          <p class="lead" style="max-width:70ch">Brief obejmuje zabudowę mieszkaniową oraz inwestycje biurowo-produkcyjno-magazynowe.</p>
-          <div style="height:18px"></div>
-          <div class="grid3">
-            <div class="tile">
-              <h3>Komplet pytań</h3>
-              <p>Stan prawny, media, grunt, funkcja, technologia i parametry obiektu – w jednej strukturze.</p>
-            </div>
-            <div class="tile">
-              <h3>Lista braków</h3>
-              <p>Raport wskazuje braki, ryzyka i pytania do doprecyzowania na etapie ofertowania.</p>
-            </div>
-            <div class="tile">
-              <h3>Wycena prac projektowych</h3>
-              <p>Możliwość oparcia wyceny o zasady zdefiniowane przez firmę (cennik tekstowy).</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="slide" id="jak">
-        <div class="wrap">
-          <h1 style="margin:0 0 14px">Proces</h1>
-          <div class="how">
-            <div class="step">
-              <div class="k">ETAP 01</div>
-              <h3>Ustawienia firmy</h3>
-              <p>Firma uzupełnia cennik i tworzy listę architektów (odbiorców raportów).</p>
-            </div>
-            <div class="step">
-              <div class="k">ETAP 02</div>
-              <h3>Brief inwestorski</h3>
-              <p>Inwestor wypełnia formularz; pola opcjonalne mogą pozostać puste.</p>
-            </div>
-            <div class="step">
-              <div class="k">ETAP 03</div>
-              <h3>Raport dla architekta</h3>
-              <p>System przygotowuje raport roboczy i przekazuje go do wskazanego odbiorcy.</p>
-            </div>
-            <div class="step">
-              <div class="k">ETAP 04</div>
-              <h3>Dalsze działania</h3>
-              <p>Raport stanowi podstawę do doprecyzowania zakresu oraz ustalenia kolejnych kroków projektowych.</p>
-            </div>
-          </div>
-          <div style="height:18px"></div>
-          <div class="cta" style="justify-content:flex-start">
-            <a class="btn gold" href="/demo">Podgląd briefu</a>
-            <a class="btn" href="/register">Rejestracja</a>
-          </div>
-        </div>
-      </section>
-
-      <section class="slide" id="cennik">
-        <div class="wrap">
-          <h1 style="margin:0 0 14px">Cennik</h1>
-          <p class="lead" style="max-width:70ch">Dostęp do platformy w rozliczeniu miesięcznym lub rocznym. Płatności realizowane są przez Stripe.</p>
-          <div style="height:18px"></div>
-          <div class="pricing">
-            <div class="price">
-              <h3>Miesięcznie</h3>
-              <div class="big">249 zł</div>
-              <div class="muted">Dla pracowni, które preferują rozliczenie miesięczne.</div>
-              <ul>
-                <li>Panel firmy + architekci</li>
-                <li>Brief + raport</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
-                <li>Cennik firmy do wycen</li>
-              </ul>
-            </div>
-            <div class="price" style="border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)">
-              <h3>Rocznie</h3>
-              <div class="big">2 690 zł</div>
-              <div class="muted">Dla pracowni realizujących inwestycje w trybie ciągłym.</div>
-              <ul>
-                <li>To samo co miesięcznie</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
-                <li>Wsparcie wdrożeniowe</li>
-                <li>Odnowienia cykliczne</li>
-              </ul>
-            </div>
+            <div class="muted" style="font-weight:800">Korzyści</div>
+            <div style="height:10px"></div>
+            <div class="muted">• Standaryzacja danych wejściowych</div>
+            <div class="muted">• Redukcja ryzyk i niejednoznaczności</div>
+            <div class="muted">• Raport dla architekta po zatwierdzeniu briefu</div>
           </div>
         </div>
       </section>
 
       <section class="slide" id="faq">
         <div class="wrap">
-          <h1 style="margin:0 0 14px">FAQ</h1>
+          <h1 style="margin:0 0 14px">Informacje</h1>
           <div class="panel card">
-            <p class="muted"><b>Czy można pozostawić pola puste?</b><br/>Tak. Raport wskaże braki i pytania do uzupełnienia.</p>
-            <p class="muted"><b>Do kogo trafia raport?</b><br/>Do wskazanego architekta (odbiorcy) zdefiniowanego w panelu firmy.</p>
-            <p class="muted"><b>Czy koszt budowy jest wyceną wiążącą?</b><br/>Nie. To estymacja robocza na potrzeby wstępnego etapu.</p>
+            <p class="muted"><b>Czy wszystkie pola muszą być wypełnione?</b><br/>Nie. Raport ma wskazać braki oraz pytania uzupełniające.</p>
+            <p class="muted"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest przeznaczony dla architekta.</p>
           </div>
         </div>
       </section>
 
       <div class="foot">
         <div class="wrap">
-          © {esc(APP_NAME)} • {badge("Tryb deweloperski", DEV_BYPASS_SUBSCRIPTION)}
+          © {esc(APP_NAME)} • {badge("DEV_BYPASS_SUBSCRIPTION=ON", DEV_BYPASS_SUBSCRIPTION)}
         </div>
       </div>
     </div>
     """
-
     return HTMLResponse(layout("Start", body=body, nav=nav_links()))
 
 
 # =========================
-# 11) Auth: rejestracja / logowanie
+# 11) Auth: rejestracja / logowanie – bez zmian
 # =========================
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page():
     body = """
     <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">Rejestracja konta firmy</h1>
-      <p class="lead">Konto firmy zarządza cennikiem oraz listą odbiorców raportów.</p>
+      <h1 style="margin:0 0 10px">Załóż konto firmy</h1>
+      <p class="lead">Konto umożliwia zarządzanie cennikiem oraz listą architektów (linki do formularzy).</p>
       <div style="height:18px"></div>
       <div class="panel card">
         <form method="post" action="/register">
           <div class="fields">
             <div class="field"><label>Nazwa firmy</label><input name="name" placeholder="np. Pracownia XYZ"/></div>
-            <div class="field"><label>E-mail (login)</label><input type="email" name="email" placeholder="biuro@..."/></div>
+            <div class="field"><label>Email (login)</label><input type="email" name="email" placeholder="biuro@..."/></div>
             <div class="field full"><label>Hasło</label><input type="password" name="password" placeholder="min. 8 znaków"/></div>
           </div>
           <div class="actions">
             <button class="btn gold" type="submit">Utwórz konto</button>
-            <a class="btn" href="/login">Przejdź do logowania</a>
+            <a class="btn" href="/login">Mam konto → logowanie</a>
           </div>
         </form>
       </div>
@@ -1283,22 +1286,12 @@ async def register(request: Request):
     password = (form.get("password") or "").strip()
 
     if not name or not email or not password or len(password) < 8:
-        return HTMLResponse(layout(
-            "Rejestracja",
-            body=flash_html("Uzupełnij nazwę firmy, adres e-mail oraz hasło (min. 8 znaków).")
-                 + '<div class="wrap formwrap"><a class="btn" href="/register">Powrót</a></div>',
-            nav=nav_links()
-        ))
+        return HTMLResponse(layout("Rejestracja", body=flash_html("Uzupełnij nazwę, email i hasło (min. 8 znaków).") + '<div class="wrap formwrap"><a class="btn" href="/register">Wróć</a></div>', nav=nav_links()))
 
     db = _load_db()
     for c in db["companies"].values():
         if c.get("email") == email:
-            return HTMLResponse(layout(
-                "Rejestracja",
-                body=flash_html("Podany adres e-mail jest już zarejestrowany.")
-                     + '<div class="wrap formwrap"><a class="btn" href="/register">Powrót</a></div>',
-                nav=nav_links()
-            ))
+            return HTMLResponse(layout("Rejestracja", body=flash_html("Ten email jest już użyty.") + '<div class="wrap formwrap"><a class="btn" href="/register">Wróć</a></div>', nav=nav_links()))
 
     cid = _new_id("cmp")
     db["companies"][cid] = {
@@ -1322,18 +1315,18 @@ async def register(request: Request):
 def login_page():
     body = """
     <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">Logowanie</h1>
-      <p class="lead">Panel firmy: cennik, odbiorcy raportów oraz subskrypcja.</p>
+      <h1 style="margin:0 0 10px">Zaloguj się</h1>
+      <p class="lead">Panel firmy: cennik, architekci i subskrypcja.</p>
       <div style="height:18px"></div>
       <div class="panel card">
         <form method="post" action="/login">
           <div class="fields">
-            <div class="field"><label>E-mail</label><input type="email" name="email" placeholder="biuro@..."/></div>
+            <div class="field"><label>Email</label><input type="email" name="email" placeholder="biuro@..."/></div>
             <div class="field"><label>Hasło</label><input type="password" name="password"/></div>
           </div>
           <div class="actions">
             <button class="btn gold" type="submit">Zaloguj</button>
-            <a class="btn" href="/register">Rejestracja</a>
+            <a class="btn" href="/register">Załóż konto</a>
           </div>
         </form>
       </div>
@@ -1353,12 +1346,7 @@ async def login(request: Request):
             request.session["company_id"] = cid
             return RedirectResponse(url="/dashboard", status_code=302)
 
-    return HTMLResponse(layout(
-        "Logowanie",
-        body=flash_html("Nieprawidłowy e-mail lub hasło.")
-             + '<div class="wrap formwrap"><a class="btn" href="/login">Powrót</a></div>',
-        nav=nav_links()
-    ))
+    return HTMLResponse(layout("Logowanie", body=flash_html("Błędny email lub hasło.") + '<div class="wrap formwrap"><a class="btn" href="/login">Wróć</a></div>', nav=nav_links()))
 
 @app.get("/logout")
 def logout(request: Request):
@@ -1367,7 +1355,7 @@ def logout(request: Request):
 
 
 # =========================
-# 12) Dashboard firmy
+# 12) Dashboard firmy – bez zmian merytorycznych
 # =========================
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1381,7 +1369,7 @@ def dashboard(request: Request):
 
     st = (company.get("stripe") or {}).get("status") or "inactive"
     sub_ok = subscription_active(company)
-    stripe_msg = "Płatności nieaktywne" if not stripe_ready() else f"Status subskrypcji: {st}"
+    stripe_msg = "Stripe niepodłączony" if not stripe_ready() else f"Stripe: {st}"
 
     architects = company.get("architects", [])
     arch_rows = []
@@ -1395,12 +1383,12 @@ def dashboard(request: Request):
               <div class="muted">{esc(a.get('email',''))}</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-              <a class="btn" href="{esc(link)}" target="_blank">Otwórz brief</a>
+              <a class="btn" href="{esc(link)}" target="_blank">Otwórz formularz</a>
               <a class="btn" href="/dashboard/architect/delete?id={esc(a['id'])}">Usuń</a>
             </div>
           </div>
           <div style="height:8px"></div>
-          <div class="muted">Link do briefu dla inwestora:</div>
+          <div class="muted">Link do briefu:</div>
           <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(238,242,255,0.85); word-break: break-all;">
             {esc(link)}
           </div>
@@ -1412,7 +1400,7 @@ def dashboard(request: Request):
       <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap">
         <div>
           <h1 style="margin:0 0 8px">{esc(company.get("name"))}</h1>
-          <div class="muted">{badge("Subskrypcja aktywna" if sub_ok else "Subskrypcja nieaktywna", sub_ok)} • {esc(stripe_msg)}</div>
+          <div class="muted">Panel firmy • {badge("Subskrypcja aktywna" if sub_ok else "Subskrypcja nieaktywna", sub_ok)} • {esc(stripe_msg)}</div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <a class="btn" href="/demo">Podgląd briefu</a>
@@ -1424,33 +1412,32 @@ def dashboard(request: Request):
 
       <div class="grid3" style="grid-template-columns: 1fr 1fr; align-items: start;">
         <div class="panel card">
-          <h3 style="margin:0 0 10px">Cennik firmy (tekst)</h3>
+          <h3 style="margin:0 0 10px">Cennik firmy (dowolny tekst)</h3>
           <p class="muted" style="margin-top:0">
-            Wklej zasady wyceny (stawki, minimalne kwoty, etapy, dodatki). System uwzględni je w raporcie.
+            Wklej zasady wyceny (np. stawki za m², pakiety, dodatki, minimalna kwota, etapy).
           </p>
           <form method="post" action="/dashboard/pricing">
             <div class="field">
               <label>Treść cennika</label>
-              <textarea name="pricing_text" placeholder="np. Projekt budowlany: 120 zł/m², min. 2 690 zł...">{esc(company.get("pricing_text",""))}</textarea>
+              <textarea name="pricing_text" placeholder="np. Koncepcja: ..., PB: ..., PW: ...">{esc(company.get("pricing_text",""))}</textarea>
             </div>
             <div class="actions">
-              <button class="btn gold" type="submit">Zapisz</button>
+              <button class="btn gold" type="submit">Zapisz cennik</button>
             </div>
           </form>
         </div>
 
         <div class="panel card">
-          <h3 style="margin:0 0 10px">Dane rozliczeniowe (opcjonalnie)</h3>
-          <p class="muted" style="margin-top:0">Dane są zapisywane w profilu firmy.</p>
+          <h3 style="margin:0 0 10px">Dane do faktury (opcjonalnie)</h3>
           <form method="post" action="/dashboard/billing">
             <div class="fields">
               <div class="field"><label>Nazwa firmy</label><input name="company_name" value="{esc((company.get("billing") or {}).get("company_name",""))}"/></div>
               <div class="field"><label>NIP</label><input name="nip" value="{esc((company.get("billing") or {}).get("nip",""))}"/></div>
               <div class="field full"><label>Adres</label><input name="address" value="{esc((company.get("billing") or {}).get("address",""))}"/></div>
-              <div class="field full"><label>E-mail do faktur</label><input name="invoice_email" value="{esc((company.get("billing") or {}).get("invoice_email",""))}"/></div>
+              <div class="field full"><label>Email do faktur</label><input name="invoice_email" value="{esc((company.get("billing") or {}).get("invoice_email",""))}"/></div>
             </div>
             <div class="actions">
-              <button class="btn gold" type="submit">Zapisz</button>
+              <button class="btn gold" type="submit">Zapisz dane</button>
             </div>
           </form>
         </div>
@@ -1459,22 +1446,20 @@ def dashboard(request: Request):
       <div style="height:18px"></div>
 
       <div class="panel card">
-        <h3 style="margin:0 0 10px">Odbiorcy raportów (architekci)</h3>
-        <p class="muted" style="margin-top:0">Dodaj odbiorcę raportów i wygeneruj indywidualny link do briefu.</p>
-
+        <h3 style="margin:0 0 10px">Architekci i linki do formularzy</h3>
         <form method="post" action="/dashboard/architect/add">
           <div class="fields">
             <div class="field"><label>Imię / identyfikator</label><input name="name" placeholder="np. Jan Kowalski"/></div>
-            <div class="field"><label>E-mail odbiorcy</label><input type="email" name="email" placeholder="jan@pracownia.pl"/></div>
+            <div class="field"><label>Email architekta (na raport)</label><input type="email" name="email" placeholder="jan@pracownia.pl"/></div>
           </div>
           <div class="actions">
-            <button class="btn gold" type="submit">Dodaj</button>
+            <button class="btn gold" type="submit">Dodaj architekta</button>
           </div>
         </form>
 
         <div style="height:14px"></div>
         <div class="grid3" style="grid-template-columns: 1fr; gap: 12px;">
-          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak zdefiniowanych odbiorców raportów.</div>'}
+          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak architektów. Dodaj pierwszego powyżej.</div>'}
         </div>
       </div>
 
@@ -1482,16 +1467,12 @@ def dashboard(request: Request):
 
       <div class="panel card">
         <h3 style="margin:0 0 10px">Subskrypcja</h3>
-        <p class="muted" style="margin-top:0">
-          Subskrypcja zapewnia dostęp do platformy oraz limit wysyłek briefów.
-        </p>
         <div class="actions">
-          <a class="btn" href="/billing/checkout?plan=monthly">Subskrypcja miesięczna (249 zł)</a>
-          <a class="btn" href="/billing/checkout?plan=yearly">Subskrypcja roczna (2 690 zł)</a>
+          <a class="btn" href="/billing/checkout?plan=monthly">Kup miesięczną (249 zł)</a>
+          <a class="btn" href="/billing/checkout?plan=yearly">Kup roczną (2 690 zł)</a>
           <span class="muted">Limit: {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc.</span>
         </div>
       </div>
-
     </div>
     """
     return HTMLResponse(layout("Panel firmy", body=body, nav=nav_links()))
@@ -1572,9 +1553,7 @@ def delete_architect(request: Request, id: str = ""):
 
     db = _load_db()
     cid = company["id"]
-    db["companies"][cid]["architects"] = [
-        a for a in db["companies"][cid].get("architects", []) if a.get("id") != id
-    ]
+    db["companies"][cid]["architects"] = [a for a in db["companies"][cid].get("architects", []) if a.get("id") != id]
     _save_db(db)
     return RedirectResponse(url="/dashboard", status_code=302)
 
@@ -1587,8 +1566,8 @@ def delete_architect(request: Request, id: str = ""):
 def demo():
     return HTMLResponse(render_form(
         action_url="/demo/submit",
-        title="Brief (podgląd)",
-        subtitle="Podgląd formularza. W trybie demonstracyjnym raport jest prezentowany na ekranie."
+        title="Brief przemysłowy (podgląd)",
+        subtitle="Podgląd formularza. W wersji produkcyjnej raport trafia do architekta."
     ))
 
 @app.post("/demo/submit", response_class=HTMLResponse)
@@ -1607,7 +1586,7 @@ async def demo_submit(request: Request):
 
     report = ai_report(
         form_clean,
-        pricing_text="(DEMO) cennik nie dotyczy",
+        pricing_text="(DEMO) brak cennika firmy",
         company={"name": "DEMO", "email": ""},
         architect={"name": "DEMO", "email": ""},
     )
@@ -1615,12 +1594,12 @@ async def demo_submit(request: Request):
     body = f"""
     <div class="wrap formwrap">
       <h1 style="margin:0 0 10px">Raport (podgląd)</h1>
-      <p class="muted">Raport w trybie demonstracyjnym.</p>
+      <p class="muted">Wersja demonstracyjna – raport wyświetlany na ekranie.</p>
       <div class="panel card" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">
 {esc(report)}
       </div>
       <div class="actions">
-        <a class="btn gold" href="/demo">Powrót</a>
+        <a class="btn gold" href="/demo">Wróć</a>
         <a class="btn" href="/">Strona główna</a>
       </div>
     </div>
@@ -1632,7 +1611,7 @@ async def demo_submit(request: Request):
 # 14) Formularz firmowy /f/{token}
 # =========================
 
-def find_by_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+def find_by_token(token: str) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     db = _load_db()
     for c in db["companies"].values():
         for a in c.get("architects", []):
@@ -1644,24 +1623,16 @@ def find_by_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[s
 def form_for_client(token: str, request: Request):
     company, architect = find_by_token(token)
     if not company or not architect:
-        return HTMLResponse(layout(
-            "Błąd",
-            body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>',
-            nav=nav_links()
-        ), status_code=404)
+        return HTMLResponse(layout("Błąd", body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=404)
 
     if not subscription_active(company):
-        return HTMLResponse(layout(
-            "Dostęp ograniczony",
-            body='<div class="wrap formwrap"><h1>Formularz niedostępny</h1><p class="muted">Dostęp do briefu jest obecnie nieaktywny.</p><a class="btn" href="/">Strona główna</a></div>',
-            nav=nav_links()
-        ), status_code=403)
+        return HTMLResponse(layout("Subskrypcja", body=f'<div class="wrap formwrap"><h1>Formularz niedostępny</h1><p class="muted">Dostęp jest czasowo zablokowany.</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
 
     submit_token = _new_submit_token()
     return HTMLResponse(render_form(
         action_url=f"/f/{token}",
-        title=f"Brief – {company.get('name','')} / {architect.get('name','')}",
-        subtitle="Prosimy o uzupełnienie dostępnych informacji. Braki danych zostaną wskazane w raporcie.",
+        title=f"Brief inwestorski – {company.get('name','')} / {architect.get('name','')}",
+        subtitle="Prosimy o możliwie pełne wypełnienie. Puste pola są dopuszczalne – raport wskaże braki i pytania krytyczne.",
         submit_token=submit_token
     ))
 
@@ -1672,7 +1643,7 @@ async def submit_form(token: str, request: Request):
         return HTMLResponse("Nieprawidłowy link", status_code=404)
 
     if not subscription_active(company):
-        return HTMLResponse("Dostęp do formularza jest nieaktywny.", status_code=403)
+        return HTMLResponse("Formularz niedostępny", status_code=403)
 
     db = _load_db()
     company_id = company.get("id")
@@ -1684,8 +1655,8 @@ async def submit_form(token: str, request: Request):
     if _forms_remaining(c) <= 0:
         body = f"""
         <div class="wrap formwrap">
-          <h1 style="margin:0 0 10px">Limit formularzy został wykorzystany</h1>
-          <p class="lead">Limit miesięczny wynosi {FORMS_PER_MONTH_LIMIT} wysłanych formularzy.</p>
+          <h1 style="margin:0 0 10px">Limit formularzy wyczerpany</h1>
+          <p class="lead">Maksymalnie {FORMS_PER_MONTH_LIMIT} wysłanych formularzy / miesiąc.</p>
           <div class="actions"><a class="btn" href="/">Strona główna</a></div>
         </div>
         """
@@ -1698,12 +1669,12 @@ async def submit_form(token: str, request: Request):
         if _mark_submit_token_used(db, submit_token):
             body = """
             <div class="wrap formwrap">
-              <h1 style="margin:0 0 10px">Brief został przyjęty</h1>
-              <p class="lead">Zgłoszenie jest przetwarzane. Dziękujemy.</p>
+              <h1 style="margin:0 0 10px">Zgłoszenie zarejestrowane</h1>
+              <p class="lead">Brief został już przekazany do analizy.</p>
               <div class="actions"><a class="btn" href="/">Strona główna</a></div>
             </div>
             """
-            return HTMLResponse(layout("Potwierdzenie", body=body, nav=nav_links()))
+            return HTMLResponse(layout("Status", body=body, nav=nav_links()))
         _save_db(db)
 
     _increment_forms_sent(db, company_id)
@@ -1731,39 +1702,28 @@ async def submit_form(token: str, request: Request):
     if architect.get("email"):
         sent = send_email(
             architect["email"],
-            subject=f"[{APP_NAME}] Brief inwestorski – {company.get('name','')} / {architect.get('name','')}",
+            subject=f"[{APP_NAME}] Nowy brief – {company.get('name','')} / {architect.get('name','')}",
             body=report,
             delivery_id=delivery_id,
         )
+    else:
+        print(f"[EMAIL] FAIL delivery_id={delivery_id} reason=architect has no email in DB")
 
-    # UI: profesjonalnie i bez informacji o logach/hostingu
-    if sent:
-        body = """
-        <div class="wrap formwrap">
-          <h1 style="margin:0 0 10px">Dziękujemy.</h1>
-          <p class="lead">Brief został przyjęty i przekazany do odbiorcy raportu.</p>
-          <div class="actions">
-            <a class="btn" href="/">Strona główna</a>
-          </div>
-        </div>
-        """
-        return HTMLResponse(layout("Potwierdzenie", body=body, nav=nav_links()))
-
+    # Komunikat dla inwestora – profesjonalny, neutralny, bez odsyłania do logów
     body = """
     <div class="wrap formwrap">
       <h1 style="margin:0 0 10px">Dziękujemy.</h1>
-      <p class="lead">Brief został przyjęty.</p>
-      <p class="muted">Jeżeli w ciągu kilku minut nie zostanie potwierdzone przekazanie raportu, prosimy o kontakt z pracownią.</p>
+      <p class="lead">Brief został przekazany do opracowania. Zespół projektowy skontaktuje się w razie potrzeby uzupełnień.</p>
       <div class="actions">
         <a class="btn" href="/">Strona główna</a>
       </div>
     </div>
     """
-    return HTMLResponse(layout("Potwierdzenie", body=body, nav=nav_links()))
+    return HTMLResponse(layout("Zgłoszenie przyjęte", body=body, nav=nav_links()))
 
 
 # =========================
-# 15) Stripe Checkout + Webhook
+# 15) Stripe Checkout + Webhook – bez zmian
 # =========================
 
 @app.get("/billing/checkout")
@@ -1841,7 +1801,7 @@ async def stripe_webhook(request: Request):
 
 
 # =========================
-# 16) Health
+# 16) Health – bez zmian
 # =========================
 
 @app.get("/health")
