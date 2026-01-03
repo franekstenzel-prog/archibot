@@ -602,12 +602,10 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     :root {{
       --bg: #070B16;
       --panel: rgba(255,255,255,0.06);
-      --panel2: rgba(255,255,255,0.08);
       --stroke: rgba(255,255,255,0.12);
       --text: #EEF2FF;
       --muted: rgba(238,242,255,0.70);
       --gold: #D6B36A;
-      --gold2: #B89443;
       --danger: #ff5b5b;
       --ok: #49d17d;
       --shadow: 0 12px 40px rgba(0,0,0,0.40);
@@ -658,7 +656,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       background: rgba(255,255,255,0.06);
       color: var(--text);
       font-weight: 700;
-      box-shadow: none;
       transition: transform .15s ease, background .15s ease, border-color .15s ease;
     }}
     .btn:hover {{ transform: translateY(-1px); background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }}
@@ -668,7 +665,6 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       border-color: rgba(214,179,106,0.85);
       box-shadow: 0 14px 40px rgba(214,179,106,0.18);
     }}
-    .btn.gold:hover {{ transform: translateY(-1px); }}
     .btn.ghost {{ background: transparent; }}
     .badge {{ padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; border:1px solid rgba(255,255,255,0.12); }}
     .badge.ok {{ color: var(--ok); border-color: rgba(73,209,125,0.35); background: rgba(73,209,125,0.08); }}
@@ -708,7 +704,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       color: var(--muted);
       font-size: 18px;
       line-height: 1.6;
-      max-width: 68ch;
+      max-width: 62ch;
     }}
     .panel {{
       background: var(--panel);
@@ -717,6 +713,15 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       box-shadow: var(--shadow);
     }}
     .card {{ padding: 20px; }}
+    .stats {{ display:grid; gap: 14px; }}
+    .stat {{
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }}
+    .stat .n {{ font-size: 26px; font-weight: 800; }}
+    .stat .t {{ color: var(--muted); font-weight: 700; }}
 
     .grid3 {{
       display:grid;
@@ -731,6 +736,45 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       transition: transform .15s ease, background .15s ease;
     }}
     .tile:hover {{ transform: translateY(-2px); background: rgba(255,255,255,0.07); }}
+    .tile h3 {{ margin: 2px 0 8px; font-size: 18px; }}
+    .tile p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
+
+    .how {{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }}
+    .step {{
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }}
+    .step .k {{ color: var(--gold); font-weight: 800; letter-spacing: .6px; font-size: 12px; }}
+    .step h3 {{ margin: 8px 0 8px; }}
+    .step p {{ margin: 0; color: var(--muted); line-height: 1.55; }}
+
+    .pricing {{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }}
+    .price {{
+      padding: 22px;
+      border-radius: 22px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }}
+    .price h3 {{ margin: 0 0 6px; }}
+    .price .big {{ font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 8px; }}
+    .price ul {{ margin: 12px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.7; }}
+    .foot {{
+      padding: 26px 0 60px;
+      color: rgba(238,242,255,0.55);
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }}
 
     .formwrap {{ padding: 32px 0 60px; }}
     .notice {{
@@ -775,10 +819,16 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       outline: none;
     }}
     input::placeholder, textarea::placeholder {{ color: rgba(238,242,255,0.40); }}
-    textarea {{ min-height: 100px; resize: vertical; }}
+    textarea {{ min-height: 90px; resize: vertical; }}
     select option {{ color: #0b0f1a; background: #ffffff; }}
     .field.full {{ grid-column: 1 / -1; }}
-    .checkrow {{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 14px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }}
+    .checkrow {{
+      display:flex; align-items:center; gap:10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+    }}
     .checkrow input[type="checkbox"] {{ width: 18px; height: 18px; }}
     .actions {{ display:flex; gap: 12px; align-items:center; margin-top: 18px; flex-wrap: wrap; }}
     .muted {{ color: var(--muted); font-weight: 650; line-height: 1.6; }}
@@ -786,6 +836,8 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     @media (max-width: 920px) {{
       .hero {{ grid-template-columns: 1fr; }}
       .grid3 {{ grid-template-columns: 1fr; }}
+      .how {{ grid-template-columns: 1fr; }}
+      .pricing {{ grid-template-columns: 1fr; }}
       .fields {{ grid-template-columns: 1fr; }}
     }}
   </style>
@@ -803,21 +855,22 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
         </div>
         <div class="cta">
           <a class="btn ghost" href="/demo">Podgląd briefu</a>
-          <a class="btn" href="/login">Zaloguj</a>
-          <a class="btn gold" href="/register">Załóż konto</a>
+          <a class="btn" href="/login">Logowanie</a>
+          <a class="btn gold" href="/register">Rejestracja</a>
         </div>
       </div>
     </div>
   </div>
+
   {body}
+
 </body>
 </html>
 """
-
 def nav_links() -> str:
     return """
-      <a href="/#funkcje">Funkcje</a>
-      <a href="/#jak">Jak działa</a>
+      <a href="/#funkcje">Zakres</a>
+      <a href="/#jak">Proces</a>
       <a href="/#cennik">Cennik</a>
       <a href="/#faq">FAQ</a>
     """
@@ -826,7 +879,6 @@ def nav_links() -> str:
 # =========================
 # 5) Render formularza
 # =========================
-
 def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Optional[str] = None) -> str:
     blocks = []
     for sec_title, fields in FORM_SCHEMA:
@@ -854,7 +906,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
                 </div>
                 """)
             elif ftype == "select":
-                options_html = ['<option value="">— (puste) —</option>']
+                options_html = ['<option value="">—</option>']
                 for o in opts:
                     options_html.append(f'<option value="{esc(o)}">{esc(o)}</option>')
                 inner.append(f"""
@@ -910,7 +962,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
           <p class="lead" style="max-width:none">{esc(subtitle)}</p>
           <div style="height:14px"></div>
           <div class="notice">
-            <b>Informacja:</b> pola mogą pozostać puste. Raport ma wskazać braki i ryzyka oraz przygotować listę pytań uzupełniających.
+            <b>Informacja:</b> dopuszczalne są braki danych. Celem briefu jest uporządkowanie informacji i wskazanie braków do uzupełnienia.
           </div>
 
           <form method="post" action="{esc(action_url)}" enctype="multipart/form-data" style="margin-top:16px">
@@ -919,7 +971,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
             <div class="actions">
               <button class="btn gold" type="submit">Zatwierdź brief</button>
               <a class="btn" href="/">Powrót</a>
-              <span class="muted">Zatwierdzenie briefu uruchamia analizę i przygotowanie raportu dla architekta.</span>
+              <span class="muted">Zatwierdzenie briefu uruchamia analizę i generuje raport.</span>
             </div>
             <script>
               (function(){{
@@ -930,7 +982,7 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
                   var btn = f.querySelector("button[type=submit]");
                   if(btn){{
                     btn.disabled = true;
-                    btn.textContent = "Przetwarzanie...";
+                    btn.textContent = "Przetwarzanie…";
                   }}
                 }}, {{ once: true }});
               }})();
@@ -943,9 +995,8 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
 
 
 # =========================
-# 6) AI / fallback report (pozostawiam – możesz rozbudować prompt pod przemysł)
+# 6) AI / fallback report
 # =========================
-
 def fallback_report(form: Dict[str, Any], pricing_text: str) -> str:
     area = float(form.get("usable_area_m2", 0) or 0)
     standard = form.get("cost_standard") or "Standard"
@@ -1188,7 +1239,7 @@ def flash_html(msg: str) -> str:
 
 
 # =========================
-# 10) Landing page – minimalnie poprawione copy
+# 10) Landing page
 # =========================
 
 @app.get("/", response_class=HTMLResponse)
@@ -1205,72 +1256,169 @@ def home():
         <div class="wrap hero">
           <div>
             <div class="kicker">
-              {badge("AI: aktywne" if openai_ok else "AI: nieaktywne", openai_ok)}
-              {badge("Email: skonfigurowany" if mail_ok else "Email: brak konfiguracji", mail_ok)}
-              {badge("Stripe: skonfigurowany" if stripe_ok else "Stripe: opcjonalnie", stripe_ok)}
+              {badge("AI – skonfigurowane" if openai_ok else "AI – nieaktywne", openai_ok)}
+              {badge("E-mail – skonfigurowane" if mail_ok else "E-mail – nieaktywne", mail_ok)}
+              {badge("Płatności – skonfigurowane" if stripe_ok else "Płatności – opcjonalne", stripe_ok)}
             </div>
-            <h1>Brief inwestorski + analiza <span class="gold">dla projektów przemysłowych</span></h1>
+            <h1>Brief inwestorski i analiza <span class="gold">dla pracowni architektonicznych</span></h1>
             <p class="lead">
-              Inwestor wypełnia szczegółowy brief. System generuje raport dla architekta: braki, ryzyka,
-              checklisty formalne oraz pytania krytyczne do doprecyzowania.
+              Inwestor uzupełnia uporządkowany brief. System przygotowuje raport dla architekta:
+              braki danych, ryzyka, checklisty formalne oraz wstępną estymację kosztów.
             </p>
             <div style="height:18px"></div>
             <div class="cta" style="justify-content:flex-start">
-              <a class="btn gold" href="/register">Rozpocznij</a>
-              <a class="btn" href="/demo">Zobacz brief (demo)</a>
+              <a class="btn gold" href="/register">Utwórz konto</a>
+              <a class="btn" href="/demo">Podgląd briefu</a>
             </div>
           </div>
           <div class="panel card">
-            <div class="muted" style="font-weight:800">Korzyści</div>
-            <div style="height:10px"></div>
-            <div class="muted">• Standaryzacja danych wejściowych</div>
-            <div class="muted">• Redukcja ryzyk i niejednoznaczności</div>
-            <div class="muted">• Raport dla architekta po zatwierdzeniu briefu</div>
+            <div class="stats">
+              <div class="stat">
+                <div class="n">Jednolity standard</div>
+                <div class="t">brief i dane wejściowe w spójnej strukturze</div>
+              </div>
+              <div class="stat">
+                <div class="n">Raport roboczy</div>
+                <div class="t">materiał do rozmowy i doprecyzowania zakresu</div>
+              </div>
+              <div class="stat">
+                <div class="n">Cennik firmy</div>
+                <div class="t">możliwość wyceny na podstawie zasad pracowni</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="funkcje">
+        <div class="wrap">
+          <h1 style="margin:0 0 14px">Zakres</h1>
+          <p class="lead" style="max-width:70ch">Brief obejmuje zabudowę mieszkaniową oraz inwestycje biurowo-produkcyjno-magazynowe.</p>
+          <div style="height:18px"></div>
+          <div class="grid3">
+            <div class="tile">
+              <h3>Komplet pytań</h3>
+              <p>Stan prawny, media, grunt, funkcja, technologia i parametry obiektu – w jednej strukturze.</p>
+            </div>
+            <div class="tile">
+              <h3>Lista braków</h3>
+              <p>Raport wskazuje braki, ryzyka i pytania do doprecyzowania na etapie ofertowania.</p>
+            </div>
+            <div class="tile">
+              <h3>Wycena prac projektowych</h3>
+              <p>Możliwość oparcia wyceny o zasady zdefiniowane przez firmę (cennik tekstowy).</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="jak">
+        <div class="wrap">
+          <h1 style="margin:0 0 14px">Proces</h1>
+          <div class="how">
+            <div class="step">
+              <div class="k">ETAP 01</div>
+              <h3>Ustawienia firmy</h3>
+              <p>Firma uzupełnia cennik i tworzy listę architektów (odbiorców raportów).</p>
+            </div>
+            <div class="step">
+              <div class="k">ETAP 02</div>
+              <h3>Brief inwestorski</h3>
+              <p>Inwestor wypełnia formularz; pola opcjonalne mogą pozostać puste.</p>
+            </div>
+            <div class="step">
+              <div class="k">ETAP 03</div>
+              <h3>Raport dla architekta</h3>
+              <p>System przygotowuje raport roboczy i przekazuje go do wskazanego odbiorcy.</p>
+            </div>
+            <div class="step">
+              <div class="k">ETAP 04</div>
+              <h3>Dalsze działania</h3>
+              <p>Raport stanowi podstawę do doprecyzowania zakresu oraz ustalenia kolejnych kroków projektowych.</p>
+            </div>
+          </div>
+          <div style="height:18px"></div>
+          <div class="cta" style="justify-content:flex-start">
+            <a class="btn gold" href="/demo">Podgląd briefu</a>
+            <a class="btn" href="/register">Rejestracja</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="cennik">
+        <div class="wrap">
+          <h1 style="margin:0 0 14px">Cennik</h1>
+          <p class="lead" style="max-width:70ch">Dostęp do platformy w rozliczeniu miesięcznym lub rocznym. Płatności realizowane są przez Stripe.</p>
+          <div style="height:18px"></div>
+          <div class="pricing">
+            <div class="price">
+              <h3>Miesięcznie</h3>
+              <div class="big">249 zł</div>
+              <div class="muted">Dla pracowni, które preferują rozliczenie miesięczne.</div>
+              <ul>
+                <li>Panel firmy + architekci</li>
+                <li>Brief + raport</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
+                <li>Cennik firmy do wycen</li>
+              </ul>
+            </div>
+            <div class="price" style="border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)">
+              <h3>Rocznie</h3>
+              <div class="big">2 690 zł</div>
+              <div class="muted">Dla pracowni realizujących inwestycje w trybie ciągłym.</div>
+              <ul>
+                <li>To samo co miesięcznie</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
+                <li>Wsparcie wdrożeniowe</li>
+                <li>Odnowienia cykliczne</li>
+              </ul>
+            </div>
           </div>
         </div>
       </section>
 
       <section class="slide" id="faq">
         <div class="wrap">
-          <h1 style="margin:0 0 14px">Informacje</h1>
+          <h1 style="margin:0 0 14px">FAQ</h1>
           <div class="panel card">
-            <p class="muted"><b>Czy wszystkie pola muszą być wypełnione?</b><br/>Nie. Raport ma wskazać braki oraz pytania uzupełniające.</p>
-            <p class="muted"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest przeznaczony dla architekta.</p>
+            <p class="muted"><b>Czy można pozostawić pola puste?</b><br/>Tak. Raport wskaże braki i pytania do uzupełnienia.</p>
+            <p class="muted"><b>Do kogo trafia raport?</b><br/>Do wskazanego architekta (odbiorcy) zdefiniowanego w panelu firmy.</p>
+            <p class="muted"><b>Czy koszt budowy jest wyceną wiążącą?</b><br/>Nie. To estymacja robocza na potrzeby wstępnego etapu.</p>
           </div>
         </div>
       </section>
 
       <div class="foot">
         <div class="wrap">
-          © {esc(APP_NAME)} • {badge("DEV_BYPASS_SUBSCRIPTION=ON", DEV_BYPASS_SUBSCRIPTION)}
+          © {esc(APP_NAME)} • {badge("Tryb deweloperski", DEV_BYPASS_SUBSCRIPTION)}
         </div>
       </div>
     </div>
     """
+
     return HTMLResponse(layout("Start", body=body, nav=nav_links()))
 
 
 # =========================
-# 11) Auth: rejestracja / logowanie – bez zmian
+# 11) Auth: rejestracja / logowanie
 # =========================
 
-@app.get("/register", response_class=HTMLResponse)
 def register_page():
     body = """
     <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">Załóż konto firmy</h1>
-      <p class="lead">Konto umożliwia zarządzanie cennikiem oraz listą architektów (linki do formularzy).</p>
+      <h1 style="margin:0 0 10px">Rejestracja konta firmy</h1>
+      <p class="lead">Konto firmy zarządza cennikiem oraz listą odbiorców raportów.</p>
       <div style="height:18px"></div>
       <div class="panel card">
         <form method="post" action="/register">
           <div class="fields">
             <div class="field"><label>Nazwa firmy</label><input name="name" placeholder="np. Pracownia XYZ"/></div>
-            <div class="field"><label>Email (login)</label><input type="email" name="email" placeholder="biuro@..."/></div>
+            <div class="field"><label>E-mail (login)</label><input type="email" name="email" placeholder="biuro@..."/></div>
             <div class="field full"><label>Hasło</label><input type="password" name="password" placeholder="min. 8 znaków"/></div>
           </div>
           <div class="actions">
             <button class="btn gold" type="submit">Utwórz konto</button>
-            <a class="btn" href="/login">Mam konto → logowanie</a>
+            <a class="btn" href="/login">Przejdź do logowania</a>
           </div>
         </form>
       </div>
@@ -1311,22 +1459,21 @@ async def register(request: Request):
     request.session["company_id"] = cid
     return RedirectResponse(url="/dashboard", status_code=302)
 
-@app.get("/login", response_class=HTMLResponse)
 def login_page():
     body = """
     <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">Zaloguj się</h1>
-      <p class="lead">Panel firmy: cennik, architekci i subskrypcja.</p>
+      <h1 style="margin:0 0 10px">Logowanie</h1>
+      <p class="lead">Panel firmy: cennik, odbiorcy raportów oraz subskrypcja.</p>
       <div style="height:18px"></div>
       <div class="panel card">
         <form method="post" action="/login">
           <div class="fields">
-            <div class="field"><label>Email</label><input type="email" name="email" placeholder="biuro@..."/></div>
+            <div class="field"><label>E-mail</label><input type="email" name="email" placeholder="biuro@..."/></div>
             <div class="field"><label>Hasło</label><input type="password" name="password"/></div>
           </div>
           <div class="actions">
             <button class="btn gold" type="submit">Zaloguj</button>
-            <a class="btn" href="/register">Załóż konto</a>
+            <a class="btn" href="/register">Rejestracja</a>
           </div>
         </form>
       </div>
@@ -1358,7 +1505,6 @@ def logout(request: Request):
 # 12) Dashboard firmy – bez zmian merytorycznych
 # =========================
 
-@app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request):
     gate = require_company(request)
     if gate:
@@ -1369,7 +1515,7 @@ def dashboard(request: Request):
 
     st = (company.get("stripe") or {}).get("status") or "inactive"
     sub_ok = subscription_active(company)
-    stripe_msg = "Stripe niepodłączony" if not stripe_ready() else f"Stripe: {st}"
+    stripe_msg = "Płatności nieaktywne" if not stripe_ready() else f"Status subskrypcji: {st}"
 
     architects = company.get("architects", [])
     arch_rows = []
@@ -1383,12 +1529,12 @@ def dashboard(request: Request):
               <div class="muted">{esc(a.get('email',''))}</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-              <a class="btn" href="{esc(link)}" target="_blank">Otwórz formularz</a>
+              <a class="btn" href="{esc(link)}" target="_blank">Otwórz brief</a>
               <a class="btn" href="/dashboard/architect/delete?id={esc(a['id'])}">Usuń</a>
             </div>
           </div>
           <div style="height:8px"></div>
-          <div class="muted">Link do briefu:</div>
+          <div class="muted">Link do briefu dla inwestora:</div>
           <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(238,242,255,0.85); word-break: break-all;">
             {esc(link)}
           </div>
@@ -1400,7 +1546,7 @@ def dashboard(request: Request):
       <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap">
         <div>
           <h1 style="margin:0 0 8px">{esc(company.get("name"))}</h1>
-          <div class="muted">Panel firmy • {badge("Subskrypcja aktywna" if sub_ok else "Subskrypcja nieaktywna", sub_ok)} • {esc(stripe_msg)}</div>
+          <div class="muted">{badge("Subskrypcja aktywna" if sub_ok else "Subskrypcja nieaktywna", sub_ok)} • {esc(stripe_msg)}</div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <a class="btn" href="/demo">Podgląd briefu</a>
@@ -1412,32 +1558,33 @@ def dashboard(request: Request):
 
       <div class="grid3" style="grid-template-columns: 1fr 1fr; align-items: start;">
         <div class="panel card">
-          <h3 style="margin:0 0 10px">Cennik firmy (dowolny tekst)</h3>
+          <h3 style="margin:0 0 10px">Cennik firmy (tekst)</h3>
           <p class="muted" style="margin-top:0">
-            Wklej zasady wyceny (np. stawki za m², pakiety, dodatki, minimalna kwota, etapy).
+            Wklej zasady wyceny (stawki, minimalne kwoty, etapy, dodatki). System uwzględni je w raporcie.
           </p>
           <form method="post" action="/dashboard/pricing">
             <div class="field">
               <label>Treść cennika</label>
-              <textarea name="pricing_text" placeholder="np. Koncepcja: ..., PB: ..., PW: ...">{esc(company.get("pricing_text",""))}</textarea>
+              <textarea name="pricing_text" placeholder="np. Projekt budowlany: 120 zł/m², min. 2 690 zł...">{esc(company.get("pricing_text",""))}</textarea>
             </div>
             <div class="actions">
-              <button class="btn gold" type="submit">Zapisz cennik</button>
+              <button class="btn gold" type="submit">Zapisz</button>
             </div>
           </form>
         </div>
 
         <div class="panel card">
-          <h3 style="margin:0 0 10px">Dane do faktury (opcjonalnie)</h3>
+          <h3 style="margin:0 0 10px">Dane rozliczeniowe (opcjonalnie)</h3>
+          <p class="muted" style="margin-top:0">Dane są zapisywane w profilu firmy.</p>
           <form method="post" action="/dashboard/billing">
             <div class="fields">
               <div class="field"><label>Nazwa firmy</label><input name="company_name" value="{esc((company.get("billing") or {}).get("company_name",""))}"/></div>
               <div class="field"><label>NIP</label><input name="nip" value="{esc((company.get("billing") or {}).get("nip",""))}"/></div>
               <div class="field full"><label>Adres</label><input name="address" value="{esc((company.get("billing") or {}).get("address",""))}"/></div>
-              <div class="field full"><label>Email do faktur</label><input name="invoice_email" value="{esc((company.get("billing") or {}).get("invoice_email",""))}"/></div>
+              <div class="field full"><label>E-mail do faktur</label><input name="invoice_email" value="{esc((company.get("billing") or {}).get("invoice_email",""))}"/></div>
             </div>
             <div class="actions">
-              <button class="btn gold" type="submit">Zapisz dane</button>
+              <button class="btn gold" type="submit">Zapisz</button>
             </div>
           </form>
         </div>
@@ -1446,20 +1593,22 @@ def dashboard(request: Request):
       <div style="height:18px"></div>
 
       <div class="panel card">
-        <h3 style="margin:0 0 10px">Architekci i linki do formularzy</h3>
+        <h3 style="margin:0 0 10px">Odbiorcy raportów (architekci)</h3>
+        <p class="muted" style="margin-top:0">Dodaj odbiorcę raportów i wygeneruj indywidualny link do briefu.</p>
+
         <form method="post" action="/dashboard/architect/add">
           <div class="fields">
             <div class="field"><label>Imię / identyfikator</label><input name="name" placeholder="np. Jan Kowalski"/></div>
-            <div class="field"><label>Email architekta (na raport)</label><input type="email" name="email" placeholder="jan@pracownia.pl"/></div>
+            <div class="field"><label>E-mail odbiorcy</label><input type="email" name="email" placeholder="jan@pracownia.pl"/></div>
           </div>
           <div class="actions">
-            <button class="btn gold" type="submit">Dodaj architekta</button>
+            <button class="btn gold" type="submit">Dodaj</button>
           </div>
         </form>
 
         <div style="height:14px"></div>
         <div class="grid3" style="grid-template-columns: 1fr; gap: 12px;">
-          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak architektów. Dodaj pierwszego powyżej.</div>'}
+          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak zdefiniowanych odbiorców raportów.</div>'}
         </div>
       </div>
 
@@ -1467,12 +1616,16 @@ def dashboard(request: Request):
 
       <div class="panel card">
         <h3 style="margin:0 0 10px">Subskrypcja</h3>
+        <p class="muted" style="margin-top:0">
+          Subskrypcja zapewnia dostęp do platformy oraz limit wysyłek briefów.
+        </p>
         <div class="actions">
-          <a class="btn" href="/billing/checkout?plan=monthly">Kup miesięczną (249 zł)</a>
-          <a class="btn" href="/billing/checkout?plan=yearly">Kup roczną (2 690 zł)</a>
+          <a class="btn" href="/billing/checkout?plan=monthly">Subskrypcja miesięczna (249 zł)</a>
+          <a class="btn" href="/billing/checkout?plan=yearly">Subskrypcja roczna (2 690 zł)</a>
           <span class="muted">Limit: {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc.</span>
         </div>
       </div>
+
     </div>
     """
     return HTMLResponse(layout("Panel firmy", body=body, nav=nav_links()))
@@ -1562,12 +1715,11 @@ def delete_architect(request: Request, id: str = ""):
 # 13) Demo formularza (publiczne)
 # =========================
 
-@app.get("/demo", response_class=HTMLResponse)
 def demo():
     return HTMLResponse(render_form(
         action_url="/demo/submit",
-        title="Brief przemysłowy (podgląd)",
-        subtitle="Podgląd formularza. W wersji produkcyjnej raport trafia do architekta."
+        title="Brief (podgląd)",
+        subtitle="Podgląd formularza. W trybie demonstracyjnym raport jest prezentowany na ekranie."
     ))
 
 @app.post("/demo/submit", response_class=HTMLResponse)
@@ -1619,20 +1771,27 @@ def find_by_token(token: str) -> tuple[Optional[Dict[str, Any]], Optional[Dict[s
                 return c, a
     return None, None
 
-@app.get("/f/{token}", response_class=HTMLResponse)
 def form_for_client(token: str, request: Request):
     company, architect = find_by_token(token)
     if not company or not architect:
-        return HTMLResponse(layout("Błąd", body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=404)
+        return HTMLResponse(layout(
+            "Błąd",
+            body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>',
+            nav=nav_links()
+        ), status_code=404)
 
     if not subscription_active(company):
-        return HTMLResponse(layout("Subskrypcja", body=f'<div class="wrap formwrap"><h1>Formularz niedostępny</h1><p class="muted">Dostęp jest czasowo zablokowany.</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
+        return HTMLResponse(layout(
+            "Dostęp ograniczony",
+            body='<div class="wrap formwrap"><h1>Formularz niedostępny</h1><p class="muted">Dostęp do briefu jest obecnie nieaktywny.</p><a class="btn" href="/">Strona główna</a></div>',
+            nav=nav_links()
+        ), status_code=403)
 
     submit_token = _new_submit_token()
     return HTMLResponse(render_form(
         action_url=f"/f/{token}",
-        title=f"Brief inwestorski – {company.get('name','')} / {architect.get('name','')}",
-        subtitle="Prosimy o możliwie pełne wypełnienie. Puste pola są dopuszczalne – raport wskaże braki i pytania krytyczne.",
+        title=f"Brief – {company.get('name','')} / {architect.get('name','')}",
+        subtitle="Prosimy o uzupełnienie dostępnych informacji. Braki danych zostaną wskazane w raporcie.",
         submit_token=submit_token
     ))
 
