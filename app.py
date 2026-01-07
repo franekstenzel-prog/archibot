@@ -85,6 +85,157 @@ REGION_MULTIPLIER = {
 }
 
 
+
+# =========================
+# 1B) AI – Structured Outputs schema (raport przemysłowy, uporządkowany)
+# =========================
+
+# Wymusza porządek odpowiedzi: AI zwraca JSON wg schematu, a aplikacja renderuje raport deterministycznie.
+REPORT_SCHEMA = {
+    "name": "industrial_architect_report_v1",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "meta": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "project_name": {"type": "string"},
+                    "client_company": {"type": "string"},
+                    "site_location": {"type": "string"},
+                },
+                "required": ["project_name", "client_company", "site_location"],
+            },
+
+            # Twarde fakty z formularza (bez dopowiadania)
+            "facts": {
+                "type": "array",
+                "minItems": 10,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "section": {"type": "string"},
+                        "field": {"type": "string"},
+                        "label": {"type": "string"},
+                        "value": {"type": "string"},
+                        "source": {"type": "string", "enum": ["client_form", "assumption"]},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    },
+                    "required": ["section", "field", "label", "value", "source", "confidence"],
+                },
+            },
+
+            "questions": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "blockers": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+                    "important": {"type": "array", "minItems": 6, "items": {"type": "string"}},
+                    "optional": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+                },
+                "required": ["blockers", "important", "optional"],
+            },
+
+            "missing_docs": {"type": "array", "items": {"type": "string"}},
+
+            "fee_estimate": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "currency": {"type": "string", "enum": ["PLN"]},
+                    "total_low_pln": {"type": "number", "minimum": 0},
+                    "total_high_pln": {"type": "number", "minimum": 0},
+                    "pricing_basis": {"type": "string"},
+                    "calc_table": {
+                        "type": "array",
+                        "minItems": 4,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "item": {"type": "string"},
+                                "basis": {"type": "string"},
+                                "qty": {"type": "number"},
+                                "unit": {"type": "string"},
+                                "unit_price_pln": {"type": "number"},
+                                "amount_pln": {"type": "number"},
+                                "source": {"type": "string", "enum": ["pricing_text", "assumption"]},
+                                "justification": {"type": "string"},
+                            },
+                            "required": ["item", "basis", "qty", "unit", "unit_price_pln", "amount_pln", "source", "justification"],
+                        },
+                    },
+                    "included_scope": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+                    "excluded_scope": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["currency", "total_low_pln", "total_high_pln", "pricing_basis", "calc_table", "included_scope", "excluded_scope"],
+            },
+
+            "build_cost_estimate": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "standard": {"type": "string"},
+                    "region": {"type": "string"},
+                    "unit_cost_low_pln_m2": {"type": "number", "minimum": 0},
+                    "unit_cost_mid_pln_m2": {"type": "number", "minimum": 0},
+                    "unit_cost_high_pln_m2": {"type": "number", "minimum": 0},
+                    "total_low_pln": {"type": "number", "minimum": 0},
+                    "total_mid_pln": {"type": "number", "minimum": 0},
+                    "total_high_pln": {"type": "number", "minimum": 0},
+                    "drivers": {"type": "array", "minItems": 5, "items": {"type": "string"}},
+                },
+                "required": [
+                    "standard", "region",
+                    "unit_cost_low_pln_m2", "unit_cost_mid_pln_m2", "unit_cost_high_pln_m2",
+                    "total_low_pln", "total_mid_pln", "total_high_pln",
+                    "drivers"
+                ],
+            },
+
+            "risks": {
+                "type": "array",
+                "minItems": 8,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "area": {"type": "string", "enum": ["PPOŻ", "BHP", "Technologia", "Logistyka", "Media", "Konstrukcja", "Formalne", "Środowisko"]},
+                        "risk": {"type": "string"},
+                        "impact": {"type": "string"},
+                        "mitigation": {"type": "string"},
+                        "priority": {"type": "string", "enum": ["P0", "P1", "P2"]},
+                    },
+                    "required": ["area", "risk", "impact", "mitigation", "priority"],
+                },
+            },
+
+            "assumptions": {"type": "array", "minItems": 6, "items": {"type": "string"}},
+            "next_steps": {"type": "array", "minItems": 6, "items": {"type": "string"}},
+
+            # Gotowy email do klienta (do skopiowania)
+            "client_email": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "subject": {"type": "string"},
+                    "body_text": {"type": "string"},
+                },
+                "required": ["subject", "body_text"],
+            },
+        },
+        "required": [
+            "meta", "facts", "questions", "missing_docs",
+            "fee_estimate", "build_cost_estimate",
+            "risks", "assumptions", "next_steps",
+            "client_email"
+        ],
+    },
+}
+
 # =========================
 # 2) FORMULARZ – BUDYNKI PRZEMYSŁOWE (wersja rozszerzona)
 # =========================
@@ -999,6 +1150,197 @@ def render_form(action_url: str, *, title: str, subtitle: str, submit_token: Opt
 # 6) AI / fallback report (pozostawiam – możesz rozbudować prompt pod przemysł)
 # =========================
 
+# -------------------------
+# AI helpers: porządek danych + deterministyczny render raportu
+# -------------------------
+
+def _form_to_rows(form: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Zamienia form dict -> lista wierszy z sekcją i etykietą (żeby AI nie gubiło pól i nie mieszało danych)."""
+    rows: List[Dict[str, str]] = []
+    known = set()
+
+    for sec_title, fields in FORM_SCHEMA:
+        for f in fields:
+            name = f.get("name")
+            label = f.get("label", name)
+            if not name:
+                continue
+            if name in form:
+                known.add(name)
+                rows.append({
+                    "section": sec_title,
+                    "field": str(name),
+                    "label": str(label),
+                    "value": str(form.get(name)),
+                })
+
+    # Dorzuć ewentualne nieznane klucze (żeby nic nie zginęło)
+    for k, v in form.items():
+        if k not in known:
+            rows.append({
+                "section": "Inne (poza schematem)",
+                "field": str(k),
+                "label": str(k),
+                "value": str(v),
+            })
+
+    return rows
+
+def _pln(x: float) -> str:
+    try:
+        return f"{int(round(float(x))):,}".replace(",", " ")
+    except Exception:
+        return str(x)
+
+def _md_escape(s: str) -> str:
+    return (s or "").replace("|", "\\|").replace("\n", " ").strip()
+
+def _md_table(headers: List[str], rows: List[List[str]]) -> str:
+    out = []
+    out.append("| " + " | ".join(headers) + " |")
+    out.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    for r in rows:
+        out.append("| " + " | ".join(_md_escape(c) for c in r) + " |")
+    return "\n".join(out)
+
+def render_architect_report(data: Dict[str, Any], company: Dict[str, Any], architect: Dict[str, Any]) -> str:
+    meta = data.get("meta") or {}
+    facts = data.get("facts") or []
+    fee = data.get("fee_estimate") or {}
+    bc = data.get("build_cost_estimate") or {}
+    questions = data.get("questions") or {}
+
+    fact_rows: List[List[str]] = []
+    for f in facts:
+        fact_rows.append([
+            str(f.get("section", "")),
+            str(f.get("label", "")),
+            str(f.get("value", "")),
+            str(f.get("source", "")),
+            str(round(float(f.get("confidence", 0) or 0), 2)),
+        ])
+
+    fee_rows: List[List[str]] = []
+    for r in (fee.get("calc_table") or []):
+        fee_rows.append([
+            str(r.get("item", "")),
+            str(r.get("basis", "")),
+            str(r.get("qty", "")),
+            str(r.get("unit", "")),
+            _pln(r.get("unit_price_pln", 0) or 0),
+            _pln(r.get("amount_pln", 0) or 0),
+            str(r.get("source", "")),
+            str(r.get("justification", "")),
+        ])
+
+    build_rows = [[
+        str(bc.get("standard", "")),
+        str(bc.get("region", "")),
+        _pln(bc.get("unit_cost_low_pln_m2", 0) or 0),
+        _pln(bc.get("unit_cost_mid_pln_m2", 0) or 0),
+        _pln(bc.get("unit_cost_high_pln_m2", 0) or 0),
+        _pln(bc.get("total_low_pln", 0) or 0),
+        _pln(bc.get("total_mid_pln", 0) or 0),
+        _pln(bc.get("total_high_pln", 0) or 0),
+    ]]
+
+    risk_rows: List[List[str]] = []
+    for r in (data.get("risks") or []):
+        risk_rows.append([
+            str(r.get("area", "")),
+            str(r.get("priority", "")),
+            str(r.get("risk", "")),
+            str(r.get("impact", "")),
+            str(r.get("mitigation", "")),
+        ])
+
+    client_email = data.get("client_email") or {"subject": "", "body_text": ""}
+
+    report = f"""# RAPORT DLA ARCHITEKTA (przemysł) – {company.get("name","")}
+
+**Projekt:** {meta.get("project_name","")}
+**Klient:** {meta.get("client_company","")}
+**Lokalizacja:** {meta.get("site_location","")}
+**Architekt:** {architect.get("name","")} <{architect.get("email","")}>
+
+---
+
+## 1) Streszczenie
+- Raport przygotowany **na podstawie formularza klienta**. Każdy wpis ma źródło: `client_form` lub `assumption`.
+- Obiekt: przemysł/logistyka – priorytety: PPOŻ, BHP, technologia, logistyka, media.
+
+---
+
+## 2) Dane wejściowe z formularza (tabela)
+{_md_table(["Sekcja", "Parametr", "Wartość", "Źródło", "Pewność"], fact_rows)}
+
+---
+
+## 3) Pytania / RFI
+**Blockery (bez tego nie domykamy wyceny / zakresu):**
+{chr(10).join([f"- {q}" for q in (questions.get("blockers") or [])])}
+
+**Ważne (wpływ na budżet / terminy / ryzyka):**
+{chr(10).join([f"- {q}" for q in (questions.get("important") or [])])}
+
+**Opcjonalne:**
+{chr(10).join([f"- {q}" for q in (questions.get("optional") or [])])}
+
+---
+
+## 4) Braki dokumentów / formalności
+{chr(10).join([f"- {x}" for x in (data.get("missing_docs") or [])])}
+
+---
+
+## 5) Wycena projektu (kalkulacja + uzasadnienie)
+**Podstawa interpretacji cennika:** {fee.get("pricing_basis","")}
+
+{_md_table(["Pozycja", "Baza", "Ilość", "Jedn.", "Stawka [PLN]", "Kwota [PLN]", "Źródło", "Uzasadnienie"], fee_rows)}
+
+**Suma (widełki):** {_pln(fee.get("total_low_pln", 0) or 0)} – {_pln(fee.get("total_high_pln", 0) or 0)} PLN
+
+**W zakresie:**
+{chr(10).join([f"- {x}" for x in (fee.get("included_scope") or [])])}
+
+**Poza zakresem:**
+{chr(10).join([f"- {x}" for x in (fee.get("excluded_scope") or [])])}
+
+---
+
+## 6) Średni koszt budowy (widełki + czynniki)
+{_md_table(["Standard", "Region", "PLN/m² low", "PLN/m² mid", "PLN/m² high", "Total low", "Total mid", "Total high"], build_rows)}
+
+**Czynniki kosztotwórcze:**
+{chr(10).join([f"- {x}" for x in (bc.get("drivers") or [])])}
+
+---
+
+## 7) Ryzyka / uwagi architekta (tabela)
+{_md_table(["Obszar", "Priorytet", "Ryzyko", "Skutek", "Mitigacja / co sprawdzić"], risk_rows)}
+
+---
+
+## 8) Założenia (jawne)
+{chr(10).join([f"- {x}" for x in (data.get("assumptions") or [])])}
+
+---
+
+## 9) Następne kroki
+{chr(10).join([f"- {x}" for x in (data.get("next_steps") or [])])}
+
+---
+
+## 10) Wiadomość do klienta (copy/paste)
+**Temat:** {client_email.get("subject","")}
+
+```text
+{client_email.get("body_text","")}
+```
+"""
+    return report
+
+
 def fallback_report(form: Dict[str, Any], pricing_text: str) -> str:
     area = float(form.get("usable_area_m2", 0) or 0)
     standard = form.get("cost_standard") or "Standard"
@@ -1054,54 +1396,83 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
 
     client = OpenAI(api_key=OPENAI_API_KEY)
 
+    # Baseline (pomocnicze) – liczby liczymy deterministycznie, AI ma je opisać/uzasadnić i ewentualnie skorygować jako jawne założenia
+    area = float(form.get("usable_area_m2", 0) or 0)
+    standard = form.get("cost_standard") or "Standard"
+    region = form.get("region_type") or "Mniejsze miasto / okolice"
+    base = float(BUILD_COST_M2_PLN.get(standard, BUILD_COST_M2_PLN.get("Standard", 6000)))
+    mult = float(REGION_MULTIPLIER.get(region, 1.0))
+    unit_mid = base * mult
+    unit_low = unit_mid * 0.90
+    unit_high = unit_mid * 1.15
+    total_low = area * unit_low if area else 0.0
+    total_mid = area * unit_mid if area else 0.0
+    total_high = area * unit_high if area else 0.0
+
     system = (
-        "Jesteś doświadczonym architektem-prowadzącym i koordynatorem projektów przemysłowych w Polsce. "
-        "Tworzysz RAPORT DLA ARCHITEKTA na podstawie briefu inwestorskiego dotyczącego obiektu przemysłowego/logistycznego. "
-        "Twoim celem jest: (a) uporządkować dane, (b) wskazać braki i ryzyka, (c) wskazać pytania krytyczne, "
-        "oraz (d) zaproponować założenia projektowe tam, gdzie inwestor nie ma danych. "
-        "Nie udzielaj porady prawnej.\n\n"
-        "Format (Markdown):\n"
-        "## 1) Streszczenie inwestycji\n"
-        "## 2) Dane wejściowe (tabela parametr → wartość)\n"
-        "## 3) Pytania krytyczne (must-have) i pytania uzupełniające (nice-to-have)\n"
-        "## 4) Braki dokumentów i formalności (checklista)\n"
-        "## 5) Ryzyka techniczne/operacyjne (PPOŻ/BHP/technologia/logistyka/media)\n"
-        "## 6) Założenia projektowe do przyjęcia wstępnie\n"
-        "## 7) Następne kroki (kolejność działań)\n"
-        "## 8) Wycena wynagrodzenia projektowego na podstawie CENNIKA firmy (jeśli dostępny)\n"
-        "Pisz po polsku. Bądź konkretny i praktyczny."
+        "Jesteś doświadczonym architektem-prowadzącym i koordynatorem projektów przemysłowych w Polsce.\n"
+        "Tworzysz: (1) raport wewnętrzny dla architekta oraz (2) gotową wiadomość do klienta do skopiowania.\n\n"
+        "KRYTYCZNE ZASADY (bez wyjątków):\n"
+        "- Raport jest NA PODSTAWIE FORMULARZA klienta. Nie mieszaj danych klienta z domysłami.\n"
+        "- Każdy fakt w polu 'facts' musi mieć source: client_form (z briefu) albo assumption (twoje założenie).\n"
+        "- Jeśli brakuje danych do wyceny: podaj widełki i dopisz brak jako questions.blockers (nie zgaduj w ciszy).\n"
+        "- Obiekt jest PRZEMYSŁOWY/LOGISTYCZNY: priorytet PPOŻ/BHP/technologia/logistyka/media.\n"
+        "- Musisz wyliczyć: (a) koszt projektu na podstawie pricing_text, (b) szacunkowy koszt budowy (widełki) oraz wszystko uzasadnić w tabelach.\n"
+        "- Pisz po polsku, rzeczowo.\n"
     )
 
-    user_payload = {
-        "company": {"name": company.get("name"), "email": company.get("email")},
-        "architect": architect,
-        "pricing_text_from_company": pricing_text,
-        "brief": form,
-        "build_cost_table_m2": {
-            "standard_base_m2_pln": BUILD_COST_M2_PLN,
-            "region_multiplier": REGION_MULTIPLIER,
-        },
-        "note": "Jeżeli brakuje danych, wskaż co można założyć i co koniecznie trzeba dopytać."
-    }
+    brief_rows = _form_to_rows(form)
 
-    prompt = json.dumps(user_payload, ensure_ascii=False)
+    user_payload = {
+        "purpose": "architect_internal_report_and_client_email",
+        "company": {"name": company.get("name", ""), "email": company.get("email", "")},
+        "architect": {"name": architect.get("name", ""), "email": architect.get("email", "")},
+        "pricing_text": pricing_text,
+        "brief_rows": brief_rows,
+        "brief_raw": form,
+        "build_cost_inputs": {
+            "usable_area_m2": area,
+            "standard": standard,
+            "region": region,
+            "base_cost_m2_pln": base,
+            "region_multiplier": mult,
+            "baseline_unit_low_pln_m2": unit_low,
+            "baseline_unit_mid_pln_m2": unit_mid,
+            "baseline_unit_high_pln_m2": unit_high,
+            "baseline_total_low_pln": total_low,
+            "baseline_total_mid_pln": total_mid,
+            "baseline_total_high_pln": total_high,
+            "table_BUILD_COST_M2_PLN": BUILD_COST_M2_PLN,
+            "table_REGION_MULTIPLIER": REGION_MULTIPLIER,
+        },
+        "rules": {
+            "do_not_mix_data": True,
+            "assumptions_must_be_explicit": True,
+            "tables_required": True,
+        },
+        "notes": "Jeśli standard/region nie występują w briefie, potraktuj je jako assumption i jasno wpisz w assumptions."
+    }
 
     try:
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
+            response_format={"type": "json_schema", "json_schema": REPORT_SCHEMA},
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
+            temperature=0.2,
         )
-        return resp.choices[0].message.content or fallback_report(form, pricing_text)
+
+        content = (resp.choices[0].message.content or "").strip()
+        data = json.loads(content) if content else None
+        if not isinstance(data, dict):
+            return fallback_report(form, pricing_text) + "\n\n[AI ERROR: invalid JSON]"
+
+        return render_architect_report(data, company, architect)
+
     except Exception as e:
         return fallback_report(form, pricing_text) + f"\n\n[AI ERROR: {type(e).__name__}: {e}]"
-
-
-# =========================
-# 7) Email (Resend HTTPS + SMTP fallback) – bez zmian
-# =========================
 
 def _safe_err(e: BaseException) -> str:
     parts = [f"{type(e).__name__}: {e}"]
