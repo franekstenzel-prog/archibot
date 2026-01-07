@@ -1461,7 +1461,7 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
                 {"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
-            temperature=0.2,
+            
         )
 
         content = (resp.choices[0].message.content or "").strip()
