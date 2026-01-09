@@ -347,7 +347,7 @@ def _delivery_windows() -> List[str]:
     return ["Dzień (6–18)", "Noc (18–6)", "24/7", "Sezonowo", "Nie wiem"]
 
 def _noise() -> List[str]:
-    return ["< 70 dB(A)", "70–80 dB(A)", "80–90 dB(A)", "> 90 dB(A)", "Punktowo/impulsowo > 90 dB(A)", "Nie wiem"]
+    return ["< 50 dB(A)","50-70 dB(A)", "70–80 dB(A)", "80–90 dB(A)", "> 90 dB(A)", "Punktowo/impulsowo > 90 dB(A)", "Nie wiem"]
     
 def _dust() -> List[str]:
     return ["Brak", "Niskie (< 1 mg/m³)", "Średnie (1–5 mg/m³)", "Wysokie (> 5 mg/m³)", "Pyły palne/ATEX", "Nie wiem"]
