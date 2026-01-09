@@ -432,7 +432,7 @@ FORM_SCHEMA: List[Section] = [
         {"name": "land_register_extract", "label": "Wypis z rejestru gruntów – posiadam", "type": "checkbox"},
         {"name": "right_to_dispose", "label": "Oświadczenie o prawie do dysponowania nieruchomością – posiadam", "type": "checkbox"},
         {"name": "environment_decision", "label": "Decyzja środowiskowa – posiadam / wymagana?", "type": "select", "options": ["Posiadam", "Wymagana – w trakcie", "Nie jest wymagana", "Nie wiem"]},
-        {"name": "agri_exclusion", "label": "Wyłączenie z produkcji rolnej – czy dotyczy / status (opis)", "type": "textarea"},
+        {"name": "agri_exclusion", "label": "Wyłączenie z produkcji rolnej – czy dotyczy / status (opis)/ klasa gruntu", "type": "textarea"},
         {"name": "water_law_permit", "label": "Operat wodnoprawny / pozwolenie wodnoprawne (np. deszczówka) – status", "type": "textarea"},
         {"name": "heritage_protection", "label": "Ochrona konserwatorska / strefy ochrony – status (opis)", "type": "textarea"},
         {"name": "legal_constraints", "label": "Inne ograniczenia prawne (służebności, strefy, sieci) – opis", "type": "textarea"},
