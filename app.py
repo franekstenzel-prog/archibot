@@ -325,7 +325,8 @@ def _soil() -> List[str]:
     return ["Piaski", "Glina", "Iły", "Nasypy", "Mieszany", "Nie wiem"]
 
 def _groundwater() -> List[str]:
-    return ["Nisko", "Średnio", "Wysoko", "Nie wiem"]
+    return ["< 1 m p.p.t.", "1–2 m p.p.t.", "2–5 m p.p.t.", "> 5 m p.p.t.", "Nie wiem"]
+    
 
 def _flood() -> List[str]:
     return ["Tak", "Nie", "Nie wiem"]
@@ -346,10 +347,10 @@ def _delivery_windows() -> List[str]:
     return ["Dzień (6–18)", "Noc (18–6)", "24/7", "Sezonowo", "Nie wiem"]
 
 def _noise() -> List[str]:
-    return ["Niska", "Średnia", "Wysoka", "Punktowo wysoka", "Nie wiem"]
-
+    return ["< 70 dB(A)", "70–80 dB(A)", "80–90 dB(A)", "> 90 dB(A)", "Punktowo/impulsowo > 90 dB(A)", "Nie wiem"]
+    
 def _dust() -> List[str]:
-    return ["Brak", "Niska", "Średnia", "Wysoka", "Pyły palne", "Nie wiem"]
+    return ["Brak", "Niskie (< 1 mg/m³)", "Średnie (1–5 mg/m³)", "Wysokie (> 5 mg/m³)", "Pyły palne/ATEX", "Nie wiem"]
 
 def _hazards() -> List[str]:
     return ["Brak", "Chemikalia", "Materiały łatwopalne", "ATEX", "Wysokie temperatury", "Niskie temperatury", "Inne (opisz)", "Nie wiem"]
@@ -367,7 +368,7 @@ def _contract_model() -> List[str]:
     return ["Ryczałt", "Kosztorysowe", "GMP", "Mieszane", "Nie wiem"]
 
 def _fire_load() -> List[str]:
-    return ["Niskie", "Średnie", "Wysokie", "Bardzo wysokie", "Nie wiem"]
+    return ["< 500 MJ/m²", "500–1000 MJ/m²", "1000–2000 MJ/m²", "> 2000 MJ/m²", "Nie wiem"]
 
 def _process_temp() -> List[str]:
     return ["Temperatura standardowa", "Kontrola temperatury", "Chłodnia", "Mroźnia", "Podwyższone temperatury", "Nie wiem"]
