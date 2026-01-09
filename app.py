@@ -368,7 +368,7 @@ def _contract_model() -> List[str]:
     return ["Ryczałt", "Kosztorysowe", "GMP", "Mieszane", "Nie wiem"]
 
 def _fire_load() -> List[str]:
-    return ["< 500 MJ/m²", "500–1000 MJ/m²", "1000–2000 MJ/m²", "> 2000 MJ/m²", "Nie wiem"]
+    return ["Q <= 500", "500 < Q <= 1000", "1000 < Q <= 2000", "2000 < Q <= 4000", "Q > 4000", "Nie wiem"]
 
 def _process_temp() -> List[str]:
     return ["Temperatura standardowa", "Kontrola temperatury", "Chłodnia", "Mroźnia", "Podwyższone temperatury", "Nie wiem"]
@@ -553,7 +553,7 @@ FORM_SCHEMA: List[Section] = [
     ("N. PPOŻ – kluczowe dane wejściowe", [
         {"name": "fire_water_availability", "label": "Dostępność wody do gaszenia pożaru (hydranty, zbiorniki, wydajność) – opis", "type": "textarea"},
         {"name": "sprinkler", "label": "Instalacja tryskaczowa – status", "type": "select", "options": _sprinkler()},
-        {"name": "fire_load", "label": "Obciążenie ogniowe (szacunek)", "type": "select", "options": _fire_load()},
+        {"name": "fire_load", "label": "Obciążenie ogniowe Q(MJ/m²)", "type": "select", "options": _fire_load()},
         {"name": "stored_materials", "label": "Rodzaj magazynowanego materiału + ilości + sposób składowania (opis)", "type": "textarea"},
         {"name": "fire_zones", "label": "Podział na strefy pożarowe (jeśli narzucony) – opis", "type": "textarea"},
         {"name": "smoke_exhaust", "label": "Oddymianie / klapy dymowe / pasma – wymagania (opis)", "type": "textarea"},
