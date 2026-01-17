@@ -1679,23 +1679,236 @@ def flash_html(msg: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    sample = """META
-- Projekt: Centrum logistyczne (cross-dock)
-- Lokalizacja: (brak)
+    sample = """
+# RAPORT DLA ARCHITEKTA (przemysł) – ARCHITEKTONICZNE STUDIO HUBERT STENZEL
 
-BLOKERY (musisz doprecyzowac przed wycena)
-1) Brak MPZP/WZ + nieznane wskazniki zabudowy
-2) Brak warunkow przylaczenia mocy (kW)
-3) Nieustalone wymagania PPOZ (sprinkler/gestosc obciazenia ogniowego)
-4) Nieznane parametry dokow i placu manewrowego
+**Projekt:** Hala Produkcyjno-Magazynowa JK1
+**Klient:** Janusz Kowalski Development Sp. z o.o.
+**Lokalizacja:** Park Przemysłowy Nowa Strefa, Gmina X
+**Architekt:** Franek <franekstenzel@gmail.com>
 
-RYZYKA (P0/P1)
-- P0: kolizje z sieciami / strefy ochronne (wymagane mapy i uzgodnienia)
-- P0: niedoszacowanie posadzki i obciazen punktowych (regały/VNA)
-- P1: brak danych o retencji i odwodnieniu (mozliwe koszty dodatkowe)
+---
 
-NASTEPNY KROK
-- Popros inwestora o: MPZP/WZ, warunki przylaczy, mapy do celow proj., dane procesu"""
+## 1) Streszczenie
+- Raport przygotowany **na podstawie formularza klienta**. Każdy wpis ma źródło: `client_form` lub `assumption`.
+- Obiekt: przemysł/logistyka – priorytety: PPOŻ, BHP, technologia, logistyka, media.
+
+---
+
+## 2) Dane wejściowe z formularza (tabela)
+| Sekcja | Parametr | Wartość | Źródło | Pewność |
+| --- | --- | --- | --- | --- |
+| A. Inwestor | Nazwa inwestora / spółki | Janusz Kowalski Development Sp. z o.o. | client_form | 0.99 |
+| A. Inwestor | Osoba kontaktowa | Janusz Kowalski, Prezes Zarządu / Inwestor | client_form | 0.99 |
+| A. Inwestor | Kto podejmuje decyzje projektowe? | Zarząd (Prezes) – decyzje strategiczne; operacyjne delegowane do PM po stronie inwestora; kluczowe etapy wymagają akceptacji Zarządu. | client_form | 0.9 |
+| A. Inwestor | Proces akceptacji | Cotygodniowe spotkania online, akceptacje do 72h, odbiory etapowe. | client_form | 0.9 |
+| A. Inwestor | Interesariusze po stronie inwestora | BHP – zewnętrzny doradca; PPOŻ – rzeczoznawca; Technologia – kierownik produkcji; IT – zewnętrzny dostawca; FM – przyszły facility manager; Audyt – audytor korporacyjny. | client_form | 0.9 |
+| B. Inwestycja | Charakter inwestycji | Nowy obiekt | client_form | 0.99 |
+| B. Inwestycja | Typ obiektu | Hala produkcyjna (produkcyjno-magazynowa) | client_form | 0.99 |
+| B. Inwestycja | Cel inwestycji / KPI | Nowy zakład produkcyjny komponentów metalowych; praca 2-zmianowa; skalowalność +30% w 5 lat. | client_form | 0.9 |
+| B. Inwestycja | Horyzont użytkowania | 25 lat | client_form | 0.9 |
+| B. Inwestycja | Rozbudowa/etapowanie | Tak – rozbudowa w przyszłości, wysoka elastyczność | client_form | 0.9 |
+| B. Inwestycja | Porażka inwestycji – definicja | Brak możliwości rozbudowy, ograniczenia energetyczne, niedostosowanie do przyszłych linii. | client_form | 0.9 |
+| C. Działka | Lokalizacja | Park Przemysłowy Nowa Strefa, Gmina X; działki 123/4, 123/5; pow. 28 000 m² | client_form | 0.99 |
+| C. Działka | Status własności | Własność inwestora | client_form | 0.99 |
+| C. Działka | Ograniczenia / ryzyka środowiskowe | Brak linii WN, brak stref zalewowych; teren płaski 1–2% spadku; brak drzew kolidujących. | client_form | 0.9 |
+| D. Geotechnika | Opinia geotechniczna | Posiadana; grunt: glina; wody gruntowe >5 m p.p.t.; nośność dobra. | client_form | 0.95 |
+| E. Formalności | Podstawa planistyczna | MPZP; wypis i wyrys posiadane. | client_form | 0.95 |
+| E. Formalności | Decyzja środowiskowa | Status: nie wiem (do potwierdzenia). | client_form | 0.7 |
+| F. Media | Warunki przyłączenia mediów | EE, woda, kanalizacja sanitarna, gaz, MEC – warunki posiadane. | client_form | 0.9 |
+| F. Media | Zasilanie / moc | Własna stacja trafo; moc teraz 500 kW, rezerwa 800 kW. | client_form | 0.95 |
+| F. Media | Woda/ścieki/opadowe | Woda – studnia; ścieki – zbiornik bezodpływowy; deszczówka – zbiornik retencyjny. | client_form | 0.9 |
+| G. Program | Powierzchnie funkcjonalne | PU 8 500 m²: produkcja 4 500; magazyn 2 500; wysyłka 800; biura 500; socjal 200. | client_form | 0.99 |
+| H. Technologia | Proces produkcyjny – opis | Dostawa → magazyn → obróbka → montaż → pakowanie → wysyłka. | client_form | 0.9 |
+| H. Technologia | Warunki procesu / zagrożenia | Hałas 70–80 dB(A); pylenie wysokie (>5 mg/m³); zagrożenia: chemikalia; wymagania temperaturowe: mroźnia (do potwierdzenia). | client_form | 0.75 |
+| I. Parametry | Kondygnacje / dach | Hala 1 kond.; biura 2 kond.; dach dwuspadowy. | client_form | 0.95 |
+| I. Parametry | Suwnica | Tak – suwnica przewidziana (parametry do ustalenia). | client_form | 0.85 |
+| J. Posadzka | Obciążenia posadzki | 50 kN/m²; standardowa posadzka przemysłowa. | client_form | 0.9 |
+| K. Logistyka | Strefa załadunku | Rampa + 6–10 doków; dostawy 24/7; wózki LPG; regały wysokiego składowania. | client_form | 0.9 |
+| M. Instalacje | Ogrzewanie / wentylacja | Ogrzewanie: sieć ciepłownicza; wentylacja: mechaniczna. | client_form | 0.9 |
+| N. PPOŻ | PPOŻ – dane | Sprinkler: nie wiem; obciążenie ogniowe Q ≤ 500 MJ/m². | client_form | 0.8 |
+| P. Organizacja | Tryb pracy | Ruch ciągły 24/7; poziom bezpieczeństwa wysoki (strefy krytyczne). | client_form | 0.9 |
+| R. Standardy | Wymagania korporacyjne | ISO 9001; BIM – opcjonalnie; NDA wymagane. | client_form | 0.9 |
+
+---
+
+## 3) Pytania / RFI
+**Blockery (bez tego nie domykamy wyceny / zakresu):**
+- Potwierdzenie, czy faktycznie wymagana jest mroźnia w procesie produkcji komponentów metalowych (to istotnie zmienia instalacje, przegrody i koszty).
+- Parametry suwnicy: udźwig [t], rozpiętość, ilość torów, strefy pracy, wymagana wysokość podhacznikowa.
+- Wysokość hali w świetle oraz siatka słupów (wymagana vs. dopuszczalna) – wpływ na regały i logistykę.
+- Czy wymagana jest instalacja tryskaczowa (FM/VS) – jeżeli tak, jaka klasa ryzyka i źródło wody pożarowej?
+- Decyzja środowiskowa: czy wymagane jest postępowanie OOŚ (screening) – prosimy o stanowisko organu/eksperta.
+- Dane do składowania/obsługi chemikaliów: rodzaje, ilości, ADR, magazynowanie (regały, kuwetowanie), wentylacja i retencja rozlewów.
+- Warunki przyłączenia – prosimy o skany: EE, gaz, woda, kanalizacja, MEC; w szczególności dostępność mocy 800 kW w horyzoncie rozbudowy.
+- Rozwiązanie dla Internetu/światłowodu – dostępność operatora, wymagania IT/OT.
+- Zatwierdzenie źródeł wody (studnia) i ścieków (zbiornik bezodpływowy) – konieczne pozwolenia wodnoprawne/zgłoszenia?
+- Liczba i parametry doków (6, 8 czy 10?) oraz typy ramp/bram; układ dróg pożarowych i TIR.
+- Standard wykończenia biur i socjalnych (materiały, HVAC, fit-out).
+
+**Ważne (wpływ na budżet / terminy / ryzyka):**
+- Preferowany model realizacji: D&B czy tradycyjny (projekt + przetarg + budowa)?
+- Plan rezerw pod rozbudowę: kierunek i minimalny bufor na działce (m², układ dróg/mediów pod etapowanie).
+- Wymogi FM/serwisu dla 24/7 (strefowanie, dostęp serwisowy, redundancje).
+- Czy wymagane są audyty/dokumentacja pod ISO 9001 na etapie projektu i uruchomienia?
+- Poziom automatyzacji magazynu (WMS, pętla indukcyjna, VNA) i wymagania pod posadzkę/znaczniki.
+- Docelowa temperatura/warunki w strefach (produkcja, magazyn, wysyłka, biura).
+- Wymagania BHP dla pyłów: system odpylania, filtry, ATEX – potwierdzenie braku ATEX.
+
+**Opcjonalne:**
+- Czy przewidziane jest BIM (LOD 300–400) – jeśli tak, +20% do ceny projektu.
+- Czy oczekiwany jest Inwestor Zastępczy (2,5–4% kosztów)?
+- Zakres nadzoru autorskiego: ryczałt wizyt vs. % od inwestycji.
+- Wymagania ESG (np. PV na dachu, BREEAM/LEED) – mogą wpływać na projekt i koszty.
+
+---
+
+## 4) Braki dokumentów / formalności
+- Wypis i wyrys MPZP – kopia do teczki projektowej.
+- Opinia geotechniczna – pełny dokument (PDF) z wierceniami i wnioskami.
+- Warunki przyłączenia: EE, woda, kanalizacja, gaz, MEC – kopie.
+- Mapa do celów projektowych 1:500 oraz mapa zasadnicza.
+- Badania hydro – jeśli planowana studnia/zbiornik retencyjny – decyzje/pozwolenia wodnoprawne (jeśli już są).
+- Inwentaryzacja zieleni (jeśli wymagana do zgłoszeń).
+- Wstępny layout technologiczny (URS) z danymi o maszynach, emisjach, mediami procesowymi.
+- Założenia dla suwnicy (karta techniczna/wytyczne).
+- Wytyczne FM/IT (sieć strukturalna, CCTV, kontrola dostępu).
+- Polityka bezpieczeństwa/ochrona – strefowanie, ogrodzenie, kontrola dostępu.
+
+---
+
+## 5) Wycena projektu (kalkulacja + uzasadnienie)
+**Podstawa interpretacji cennika:** Ceny netto wg cennika (bez VAT 23%). Wariant: projekt wielobranżowy (komplet PB+PT+PW) + prace przedprojektowe i operat ppoż. Widełki wynikają z stawek jednostkowych i pozycji 'od ... PLN'. Pozycje OOŚ, nadzór autorski, projekt technologii – poza sumą (TBD).
+
+| Pozycja | Baza | Ilość | Jedn. | Stawka [PLN] | Kwota [PLN] | Źródło | Uzasadnienie |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Analiza chłonności terenu – LOW | Ryczałt od 3 500 PLN | 1 | ryczałt | 3 500 | 3 500 | pricing_text | Minimalna stawka katalogowa. |
+| Analiza chłonności terenu – HIGH | Zakres rozszerzony (spotkania/warianty) | 1 | ryczałt | 6 000 | 6 000 | assumption | Możliwy większy nakład prac przy etapowaniu/rozbudowie. |
+| Koncepcja architektoniczna – LOW | 10 PLN/m² | 8500 | m² | 10 | 85 000 | pricing_text | Wizualizacje, rzuty, bilans terenu – wariant podstawowy. |
+| Koncepcja architektoniczna – HIGH | 20 PLN/m² | 8500 | m² | 20 | 170 000 | pricing_text | Więcej wariantów, koordynacje międzybranżowe. |
+| Audyt techniczny działki (Due Diligence) – LOW | od 4 000 PLN | 1 | ryczałt | 4 000 | 4 000 | pricing_text | Przegląd formalny, uzbrojenie, ograniczenia. |
+| Audyt techniczny działki (Due Diligence) – HIGH | rozszerzony zakres | 1 | ryczałt | 8 000 | 8 000 | assumption | Dodatkowe wizje lokalne/uzgodnienia. |
+| Projekt wielobranżowy (komplet PB+PT+PW) – LOW | 90 PLN/m² | 8500 | m² | 90 | 765 000 | pricing_text | Architektura, konstrukcja, instalacje wew./zew. – zakres podstawowy. |
+| Projekt wielobranżowy (komplet PB+PT+PW) – HIGH | 150 PLN/m² | 8500 | m² | 150 | 1 275 000 | pricing_text | Złożoność: suwnica, wys. obciążenia, możliwa mroźnia/chemikalia. |
+| Operat przeciwpożarowy – LOW | od 5 000 PLN | 1 | ryczałt | 5 000 | 5 000 | pricing_text | Operat + uzgodnienia z rzeczoznawcą ppoż. |
+| Operat przeciwpożarowy – HIGH | rozszerzony zakres | 1 | ryczałt | 10 000 | 10 000 | assumption | Większa liczba stref pożarowych/uzgodnień. |
+| Analiza oddziaływania na środowisko (OŚ) – OPCJA | od 8 000 PLN | 1 | ryczałt | 8 000 | 8 000 | pricing_text | Tylko jeśli organ nakaże OOŚ – poza sumą (TBD). |
+| Nadzór autorski – OPCJA | 500 PLN/wizyta lub 1–2% CAPEX | 12 | wizyta | 500 | 6 000 | pricing_text | Model rozliczenia do uzgodnienia – poza sumą (TBD). |
+
+**Suma (widełki):** 862 500 – 1 469 000 PLN
+
+**W zakresie:**
+- Analiza chłonności terenu.
+- Koncepcja architektoniczna (wstępna).
+- Projekt wielobranżowy komplet: PB+PT+PW (architektura, konstrukcja, instalacje wewnętrzne i zewnętrzne do granicy działki).
+- Operat przeciwpożarowy i uzgodnienia ppoż/BHP/sanepid.
+
+**Poza zakresem:**
+- Wniosek o WZ (nie dotyczy – MPZP).
+- Projekt technologii przemysłowej/linii – wycena indywidualna (po wytycznych technologa).
+- Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
+- Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
+- Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
+- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
+
+---
+
+## 6) Średni koszt budowy (widełki + czynniki)
+| Standard | Region | PLN/m² low | PLN/m² mid | PLN/m² high | Total low | Total mid | Total high |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Standard | Mniejsze miasto / okolice | 5 400 | 6 000 | 6 900 | 45 900 000 | 51 000 000 | 58 650 000 |
+
+**Czynniki kosztotwórcze:**
+- Suwnica – wzrost tonażu konstrukcji, wzmocnienia podtorzy.
+- Wysokie obciążenia posadzki (50 kN/m²) – zbrojenie/technologia posadzki, dylatacje.
+- Regały wysokiego składowania – wpływ na wysokość hali, instalacje tryskaczowe (jeśli będą).
+- Możliwe wymagania mroźni – izolacje termiczne, chłodnictwo, szczelność przegród (do potwierdzenia).
+- Chemikalia i wysokie pylenie – instalacje wentylacji/odpylania, separacja stref, retencja rozlewów.
+- Zasilanie własną stacją trafo – CAPEX przyłącza/GPZ, rezerwy mocy.
+- Ścieki do zbiornika bezodpływowego i retencja deszczówki – dodatkowa infrastruktura zewnętrzna.
+- Tryb 24/7 i wysoki poziom bezpieczeństwa – systemy SSWiN, CCTV, KD, redundancje HVAC/EE.
+- 6–10 doków i rampa – place manewrowe, nawierzchnie o podwyższonej nośności.
+
+---
+
+## 7) Ryzyka / uwagi architekta (tabela)
+| Obszar | Priorytet | Ryzyko | Skutek | Mitigacja / co sprawdzić |
+| --- | --- | --- | --- | --- |
+| PPOŻ | P0 | Brak decyzji nt. tryskaczy i klasy odporności pożarowej; chemikalia w procesie. | Możliwe przeprojektowania, wzrost kosztów instalacji/gromadzenia wody ppoż. | Wczesne uzgodnienia z rzeczoznawcą ppoż.; analiza Q, scenariusze pożarowe; decyzja o sprinkler/FM. |
+| BHP | P1 | Wysokie pylenie i hałas 70–80 dB(A). | Ryzyko niezgodności z NDS/PN, konieczność kosztownych systemów odpylania/wyciszeń. | Projekt systemów odpylania, separacja źródeł hałasu, strefy ruchu pieszych, audyt BHP. |
+| Technologia | P0 | Brak szczegółowego layoutu linii i wymagań mediów procesowych. | Ryzyko kolizji międzybranżowych i zmiany konstrukcji/instalacji na późnym etapie. | Warsztaty z kier. produkcji; zamrożenie URS/URS-M na etapie koncepcji; rezerwy w posadzce/kanale mediów. |
+| Logistyka | P1 | Niedookreślona liczba doków i parametry ruchu TIR/OSD. | Niewystarczająca przepustowość, zatory, konieczność rozbudowy placów. | Analizy przepustowości, symulacje ruchu, docelowy masterplan z etapowaniem. |
+| Media | P0 | Niepewność co do dostępności 800 kW w horyzoncie rozbudowy. | Ograniczenie mocy – ryzyko braku skalowalności. | Wnioski do OSD o rezerwę mocy; projekt stacji trafo pod 800 kW; miejsce na drugie trafo. |
+| Konstrukcja | P1 | Suwnica + 50 kN/m² – zwiększone obciążenia na fundamenty i słupy. | Wyższy CAPEX, możliwe zmiany siatki słupów/wysokości. | Wczesne obliczenia statyczne, definicja parametrów suwnicy, próby podłoża pod torowiska. |
+| Formalne | P1 | Możliwa konieczność OOŚ/pozwoleń wodnoprawnych (studnia, retencja, zbiornik). | Wydłużenie procedur, warunki środowiskowe dla eksploatacji. | Screening środowiskowy; konsultacja z RDOŚ/Wodami Polskimi; harmonogram decyzji. |
+| Środowisko | P2 | Zbiornik bezodpływowy – ryzyko pojemności/wywozu; retencja deszczówki – wymiarowanie. | Koszty operacyjne i inwestycyjne, ewentualne rozbudowy zbiorników. | Bilans ścieków/deszczówki, analiza opadów, przewymiarowanie na etapowanie. |
+
+---
+
+## 8) Założenia (jawne)
+- Szacunek kosztów budowy oparty o standard wykonania „Standard” i region „Mniejsze miasto/okolice” – brak wskazania w briefie.
+- Jednostkowe widełki dla pozycji z oznaczeniem „od … PLN” (analiza chłonności, due diligence, operat ppoż.) przyjęto orientacyjnie do górnego zakresu kosztów (nie stanowi oferty).
+- Wycena projektowa przyjęta jako „Projekt wielobranżowy – komplet (PB+PT+PW)”, aby uniknąć dublowania pozycji PB i PW.
+- Mapa do celów projektowych i badania geotechniczne poza zakresem cennika – koszty po stronie zewnętrznych dostawców.
+- BIM traktowany jako opcja (+20% do projektu) – w bazowej kalkulacji nie ujęto.
+- Nadzór autorski i Inwestor Zastępczy – pozycje opcjonalne, poza bazową sumą.
+
+---
+
+## 9) Następne kroki
+- Podpisanie NDA i przekazanie dokumentów: MPZP (wypis/wyrys), geotechnika, warunki przyłączeniowe, mapa do celów projektowych.
+- Warsztaty funkcjonalno-technologiczne (2–3 h) z kierownikiem produkcji i BHP/PPOŻ – doprecyzowanie layoutu, suwnicy i stref poż.
+- Decyzja dot. mroźni: czy występuje i w jakim zakresie – jeśli tak, przygotujemy wariant instalacyjny.
+- Potwierdzenie liczby doków i parametrów placów manewrowych; wstępny masterplan z rezerwą pod rozbudowę.
+- Screening środowiskowy (czy wymagane OOŚ) + wstępne uzgodnienia wodnoprawne (studnia, retencja, zbiornik).
+- Aktualizacja koncepcji i kosztorysu inwestorskiego (CAPEX) po doprecyzowaniu kluczowych założeń.
+- Uzgodnienie trybu współpracy (D&B vs. tradycyjny), kalendarz spotkań i kamieni milowych.
+
+---
+
+## 10) Wiadomość do klienta (copy/paste)
+**Temat:** Hala Produkcyjno-Magazynowa JK1 – podsumowanie briefu, widełki kosztów i pytania kluczowe
+
+```text
+Szanowny Panie Prezesie,
+
+Dziękujemy za wypełnienie briefu dla projektu „Hala Produkcyjno-Magazynowa JK1”. Poniżej przesyłamy podsumowanie oraz proponowane kolejne kroki.
+
+1) Zakres i wstępne widełki kosztów projektu (netto):
+- Analiza chłonności terenu: 3 500 – 6 000 PLN (ryczałt).
+- Koncepcja architektoniczna: 10–20 PLN/m² → 85 000 – 170 000 PLN.
+- Projekt wielobranżowy (komplet PB+PT+PW): 90–150 PLN/m² → 765 000 – 1 275 000 PLN.
+- Operat ppoż.: 5 000 – 10 000 PLN.
+- Audyt techniczny działki (Due Diligence): 4 000 – 8 000 PLN.
+Suma orientacyjna (bazowy zakres, bez VAT): ok. 862 500 – 1 469 000 PLN.
+Pozycje opcjonalne (poza sumą): Analiza oddziaływania na środowisko (od 8 000 PLN – jeśli organ tego wymaga), Nadzór Autorski (500 PLN/wizyta lub 1–2% wartości inwestycji), projekt technologii linii (wycena indywidualna).
+
+2) Szacunek kosztów realizacji (CAPEX, standard „Standard”, lokalizacja: mniejsze miasto – założenia robocze):
+- 5 400 – 6 900 PLN/m²; przy 8 500 m² daje to ok. 45,9 – 58,65 mln PLN netto.
+Kluczowe czynniki kosztowe: suwnica i obciążenia 50 kN/m², potencjalna mroźnia, chemikalia i odpylanie, liczba doków 6–10, własna stacja trafo, retencja i zbiornik bezodpływowy, tryb 24/7.
+
+3) Pytania blokujące (prosimy o odpowiedź/załączniki):
+- Czy faktycznie wymagana jest mroźnia w procesie (dla komponentów metalowych)? Jeśli tak – jakie parametry?
+- Parametry suwnicy: udźwig, rozpiętość, ilość torów, wysokość podhacznikowa.
+- Wysokość hali w świetle oraz oczekiwana siatka słupów.
+- Czy wymagany będzie sprinkler (i jaka klasa ryzyka)?
+- Decyzja środowiskowa/OOŚ – czy była wstępna konsultacja z organem?
+- Skany warunków przyłączenia (EE, gaz, woda, kanalizacja, MEC) + informacja o rezerwie 800 kW.
+- Dane o chemikaliach (rodzaje, ilości, sposób magazynowania, ADR) i wymogi BHP dla pyłów.
+- Liczba doków docelowo (6/8/10) i założenia dla placów manewrowych.
+- Standard wykończenia biur i socjalnych.
+
+4) Proponowane kolejne kroki:
+- Podpisanie NDA i przekazanie dokumentów (MPZP, geotechnika, warunki przyłączenia, mapa do celów projektowych).
+- Krótki warsztat funkcjonalno-technologiczny (online) – doprecyzowanie layoutu i kluczowych parametrów.
+- Aktualizacja koncepcji i kosztorysu inwestorskiego po uzgodnieniach.
+
+Jesteśmy gotowi rozpocząć od Analizy Chłonności i Koncepcji. Proszę o informację dot. dostępnych terminów na warsztat oraz o dosłanie ww. dokumentów.
+
+Z wyrazami szacunku,
+Franek
+ARCHITEKTONICZNE STUDIO HUBERT STENZEL
+franekstenzel@gmail.com"""
 
     free_card = """
             <div class=\"price\" style=\"border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)\" data-reveal>
