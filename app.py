@@ -47,7 +47,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 
 # Email (Gmail SMTP często NIE działa na hostingu przez blokadę egress SMTP)
-BOT_EMAIL = os.getenv("BOT_EMAIL", "twój.bot.architektoniczny@gmail.com").strip()
+BOT_EMAIL = os.getenv("BOT_EMAIL", "twoj.bot.architektoniczny@gmail.com").strip()
 # App password od Google może mieć spacje -> usuwamy
 BOT_EMAIL_PASSWORD = (os.getenv("BOT_EMAIL_PASSWORD", "") or "").strip().replace(" ", "")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
@@ -1512,7 +1512,7 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
         "Tworzysz: (1) raport wewnętrzny dla architekta oraz (2) gotową wiadomość do klienta do skopiowania.\n\n"
         "KRYTYCZNE ZASADY (bez wyjątków):\n"
         "- Raport jest NA PODSTAWIE FORMULARZA klienta. Nie mieszaj danych klienta z domysłami.\n"
-        "- Każdy fakt w polu 'facts' musi mieć source: client_form (z briefu) albo assumption (twóje założenie).\n"
+        "- Każdy fakt w polu 'facts' musi mieć source: client_form (z briefu) albo assumption (twoje założenie).\n"
         "- Jeśli brakuje danych do wyceny: podaj widełki i dopisz brak jako questions.blockers (nie zgaduj w ciszy).\n"
         "- Obiekt jest PRZEMYSŁOWY/LOGISTYCZNY: priorytet PPOŻ/BHP/technologia/logistyka/media.\n"
         "- Musisz wyliczyć: (a) koszt projektu na podstawie pricing_text, (b) szacunkowy koszt budowy (widełki) oraz wszystko uzasadnić w tabelach.\n"
@@ -1849,7 +1849,7 @@ def home():
 - Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
 - Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
 - Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
-- Mapa do celów projektowych i badania geotechniczne – złecane odrębnie (poza cennikiem).
+- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
 
 ---
 
@@ -2618,7 +2618,7 @@ async def demo_submit(request: Request):
 - Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
 - Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
 - Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
-- Mapa do celów projektowych i badania geotechniczne – złecane odrębnie (poza cennikiem).
+- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
 
 ---
 
