@@ -2067,7 +2067,7 @@ franekstenzel@gmail.com"""
           <div class=\"panel card\" data-reveal>
             <p class=\"muted\"><b>Czy wszystkie pola musza byc wypełnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
             <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespolu projektowego.</p>
-            <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zł?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
+            <p class=\"muted\"><b>W jaki sposób przekazać brief inwestorowi?</b><br/>Wystarczy skopiować link pod nazwą architekta i wysłać go do inwestora</code>.</p>
           </div>
           <div style=\"height:18px\"></div>
           <div class=\"cta\" style=\"justify-content:flex-start\" data-reveal>
