@@ -14,7 +14,7 @@ import socket
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 # Optional deps – app ma działać bez konfiguracji
@@ -661,10 +661,10 @@ ENABLE_FREE_PLAN = (os.getenv("ENABLE_FREE_PLAN", "true").lower() in ("1", "true
 FREE_FORMS_PER_MONTH_LIMIT = int(os.getenv("FREE_FORMS_PER_MONTH_LIMIT", "3"))
 
 PLAN_LABELS = {
-    "free": "Beta 0 zl",
-    "monthly": "Miesieczny",
+    "free": "Beta 0 zł",
+    "monthly": "Miesięczny",
     "yearly": "Roczny",
-    "none": "Brak dostepu",
+    "none": "Brak dostępu",
 }
 
 def _company_plan(company: dict) -> str:
@@ -778,7 +778,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{esc(title)} • {APP_NAME}</title>
-  <link rel="icon" type="image/png" href="/assets/logo_arch.png"/>
+  <link rel="icon" href="/logo_arch.png" type="image/png"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -826,8 +826,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     }}
     .logo {{
       width:34px; height:34px; border-radius: 12px;
-      display:block;
-      object-fit: cover;
+      background: url('/logo_arch.png') center/contain no-repeat;
       box-shadow: 0 10px 30px rgba(214,179,106,0.20);
     }}
     .menu {{ display:flex; align-items:center; gap:16px; color: var(--muted); font-weight:600; }}
@@ -1044,7 +1043,7 @@ li {{ margin: 6px 0; }}
     <div class="wrap">
       <div class="nav">
         <div class="brand">
-          <img class="logo" src="/assets/logo_arch.png" alt="ARCH" />
+          <div class="logo"></div>
           <div>{esc(APP_NAME)}</div>
         </div>
         <div class="menu">
@@ -1627,7 +1626,7 @@ def stripe_ready() -> bool:
     return bool(stripe is not None and STRIPE_SECRET_KEY and (STRIPE_PRICE_ID_MONTHLY or STRIPE_PRICE_ID_YEARLY) and STRIPE_WEBHOOK_SECRET)
 
 def subscription_active(company: Dict[str, Any]) -> bool:
-    """Czy firma ma dostep do formularzy/analiz (platny lub free/beta)."""
+    """Czy firma ma dostęp do formularzy/analiz (płatny lub free/beta)."""
     if DEV_BYPASS_SUBSCRIPTION:
         return True
     st = (company.get("stripe") or {}).get("status") or ""
@@ -1654,6 +1653,19 @@ app.add_middleware(
     same_site="lax",
     https_only=BASE_URL.startswith("https://"),
 )
+
+@app.get("/logo_arch.png")
+def logo_arch_png():
+    p = os.path.join(os.path.dirname(__file__), "logo_arch.png")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="image/png")
+    return PlainTextResponse("logo_arch.png not found", status_code=404)
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return RedirectResponse(url="/logo_arch.png")
+
 
 def get_company(request: Request) -> Optional[Dict[str, Any]]:
     cid = request.session.get("company_id")
@@ -1914,16 +1926,16 @@ franekstenzel@gmail.com"""
 
     free_card = """
             <div class=\"price\" style=\"border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)\" data-reveal>
-              <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zl</div>
-              <h3 style=\"margin:10px 0 0\">Beta (0 zl)</h3>
-              <div class=\"big\">0 zl</div>
-              <div class=\"muted\">Dla pierwszych wdrozen. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiac</b>.</div>
+              <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zł</div>
+              <h3 style=\"margin:10px 0 0\">Beta (0 zł)</h3>
+              <div class=\"big\">0 zł</div>
+              <div class=\"muted\">Dla pierwszych wdrożeń. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiąc</b>.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
                 <li>Brief + raport</li>
-                <li>Limit """ + str(FREE_FORMS_PER_MONTH_LIMIT) + """ / miesiac</li>
+                <li>Limit """ + str(FREE_FORMS_PER_MONTH_LIMIT) + """ / miesiąc</li>
               </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn gold\" href=\"/register\">Odbierz dostep</a></div>
+              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn gold\" href=\"/register\">Odbierz dostęp</a></div>
             </div>
     """ if ENABLE_FREE_PLAN else ""
 
@@ -1935,14 +1947,14 @@ franekstenzel@gmail.com"""
             <div class=\"kicker\">
               <span class=\"tag\"><span class=\"dot\"></span>Standaryzacja briefu inwestora</span>
             </div>
-            <h1>Brief inwestorski → raport braków i ryzyk <span class=\"gold\">dla projektow przemyslowych</span></h1>
+            <h1>Brief inwestorski → raport brakow i ryzyk <span class=\"gold\">dla projektow przemyslowych</span></h1>
             <p class=\"lead\">
               Inwestor wypelnia formularz. Ty dostajesz raport: braki danych, ryzyka (P0/P1), pytania krytyczne i następne kroki.
               Bez chaosu w mailach i bez wyceny na oślep.
             </p>
             <div style=\"height:18px\"></div>
             <div class=\"cta\" style=\"justify-content:flex-start\">
-              <a class=\"btn gold\" href=\"/register\">Zaloz konto</a>
+              <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
               <a class=\"btn\" href=\"/demo\">Zobacz brief</a>
             </div>
             <div style=\"height:18px\"></div>
@@ -1954,11 +1966,11 @@ franekstenzel@gmail.com"""
           </div>
 
           <div class=\"panel card floaty\" data-reveal>
-            <div class=\"muted\" style=\"font-weight:900\">Przyklad: co wyłapie raport</div>
+            <div class=\"muted\" style=\"font-weight:900\">Przykład: co wyłapie raport</div>
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
               <div style=\"font-weight:900\">Blokery (P0)</div>
-              <div class=\"muted\">Brak MPZP/WZ, brak mocy przyłączeniowej, brak PPOŻ, brak parametrow dokow.</div>
+              <div class=\"muted\">Brak MPZP/WZ, brak mocy przyłączeniowej, brak PPOŻ, brak parametrów doków.</div>
             </div>
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
@@ -1967,7 +1979,7 @@ franekstenzel@gmail.com"""
             </div>
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
-              <div style=\"font-weight:900\">Następne kroki</div>
+              <div style=\"font-weight:900\">Nastepne kroki</div>
               <div class=\"muted\">Lista dokumentow i pytan do inwestora (gotowa do wyslania).</div>
             </div>
           </div>
@@ -1981,8 +1993,8 @@ franekstenzel@gmail.com"""
           <div style=\"height:18px\"></div>
           <div class=\"grid3\">
             <div class=\"tile\" data-reveal><h3>Komplet pytan</h3><p>Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
-            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujace dokumenty, niejasnosci do doprecyzowania.</p></div>
-            <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomosc: prosba o uzupelnienia + lista pytan krytycznych.</p></div>
+            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujące dokumenty, niejasności do doprecyzowania.</p></div>
+            <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomość: prosba o uzupelnienia + lista pytan krytycznych.</p></div>
           </div>
         </div>
       </section>
@@ -1990,13 +2002,13 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"raport\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Raport demo</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Ponizej przykladowy fragment raportu. W produkcji trafia na mail architekta po zatwierdzeniu briefu.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Poniżej przykładowy fragment raportu. W produkcji trafia na mail architekta po zatwierdzeniu briefu.</p>
           <div style=\"height:18px\"></div>
           <div class=\"panel card\" data-reveal>
             <div class=\"codebox\">{esc(sample)}</div>
             <div class=\"actions\" style=\"margin-top:14px\">
               <a class=\"btn gold\" href=\"/demo\">Wypelnij demo brief</a>
-              <a class=\"btn\" href=\"/register\">Zaloz konto</a>
+              <a class=\"btn\" href=\"/register\">Załóż konto</a>
             </div>
           </div>
         </div>
@@ -2004,7 +2016,7 @@ franekstenzel@gmail.com"""
 
       <section class=\"slide\" id=\"jak\">
         <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to działa</h1>
+          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to dziala</h1>
           <div class=\"how\">
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektow (odbiorcy raportow) i opcjonalnie cennik wycen.</p></div>
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 02</div><h3>Brief inwestora</h3><p>Inwestor wypelnia formularz. Puste pola sa dopuszczalne.</p></div>
@@ -2017,33 +2029,33 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"cennik\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Plany</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Wersja produkcyjna ma plany platne przez Stripe. Jesli potrzebujesz: uruchom Beta 0 zl i testuj na realnych briefach.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Wersja produkcyjna ma plany platne przez Stripe. Jesli potrzebujesz: uruchom Beta 0 zł i testuj na realnych briefach.</p>
           <div style=\"height:18px\"></div>
           <div class=\"pricing\" style=\"grid-template-columns: repeat(3, 1fr);\">
             {free_card}
             <div class=\"price\" data-reveal>
-              <h3>Miesiecznie</h3>
-              <div class=\"big\">249 zl</div>
-              <div class=\"muted\">Dla pracowni, ktore chca rozliczenie miesieczne.</div>
+              <h3>Miesięcznie</h3>
+              <div class=\"big\">249 zł</div>
+              <div class=\"muted\">Dla pracowni, ktore chca rozliczenie miesięczne.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
                 <li>Brief + raport</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiac</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
                 <li>Cennik firmy do wycen</li>
               </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Zaloz konto</a></div>
+              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
             <div class=\"price\" data-reveal>
               <h3>Rocznie</h3>
-              <div class=\"big\">2 690 zl</div>
+              <div class=\"big\">2 690 zł</div>
               <div class=\"muted\">Dla pracowni pracujacych w trybie ciaglym.</div>
               <ul>
-                <li>To samo co miesiecznie</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiac</li>
-                <li>Wsparcie wdrozeniowe</li>
+                <li>To samo co miesięcznie</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
+                <li>Wsparcie wdrożeniowe</li>
                 <li>Odnowienia cykliczne</li>
               </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Zaloz konto</a></div>
+              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
           </div>
         </div>
@@ -2055,11 +2067,11 @@ franekstenzel@gmail.com"""
           <div class=\"panel card\" data-reveal>
             <p class=\"muted\"><b>Czy wszystkie pola musza byc wypelnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
             <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespolu projektowego.</p>
-            <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zl?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
+            <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zł?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
           </div>
           <div style=\"height:18px\"></div>
           <div class=\"cta\" style=\"justify-content:flex-start\" data-reveal>
-            <a class=\"btn gold\" href=\"/register\">Zaloz konto</a>
+            <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
             <a class=\"btn\" href=\"/login\">Zaloguj</a>
           </div>
         </div>
@@ -2235,17 +2247,17 @@ def dashboard(request: Request):
 
     free_action = ""
     if ENABLE_FREE_PLAN and plan not in ("monthly", "yearly"):
-        free_action = "<a class=\"btn\" href=\"/dashboard/plan/free\">Aktywuj Beta 0 zl</a>"
+        free_action = "<a class=\"btn\" href=\"/dashboard/plan/free\">Aktywuj Beta 0 zł</a>"
 
     body = f"""
     <div class=\"wrap formwrap\">
       <div style=\"display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap\">
         <div>
           <h1 style=\"margin:0 0 8px\">{esc(company.get('name'))}</h1>
-          <div class=\"muted\">Panel firmy • {badge('Dostep aktywny' if access_ok else 'Dostep zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
+          <div class=\"muted\">Panel firmy • {badge('Dostęp aktywny' if access_ok else 'Dostęp zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
         </div>
         <div style=\"display:flex;gap:10px;align-items:center;flex-wrap:wrap\">
-          <a class=\"btn\" href=\"/demo\">Podglad briefu</a>
+          <a class=\"btn\" href=\"/demo\">Podgląd briefu</a>
           <a class=\"btn\" href=\"/logout\">Wyloguj</a>
         </div>
       </div>
@@ -2254,7 +2266,7 @@ def dashboard(request: Request):
 
       <div class=\"grid3\" style=\"grid-template-columns: repeat(3, 1fr);\">
         <div class=\"stat\"><div class=\"k\">PLAN</div><div class=\"n\">{esc(plan_label)}</div><div class=\"t\">{('Limit ' + str(limit) + ' / mies.') if limit else 'Wymaga aktywacji planu'}</div></div>
-        <div class=\"stat\"><div class=\"k\">ZUYCIE</div><div class=\"n\">{esc(limit_label)}</div><div class=\"t\">Pozostalo: {remaining}</div></div>
+        <div class=\"stat\"><div class=\"k\">ZUŻYCIE</div><div class=\"n\">{esc(limit_label)}</div><div class=\"t\">Pozostało: {remaining}</div></div>
         <div class=\"stat\"><div class=\"k\">STATUS</div><div class=\"n\">{esc(st)}</div><div class=\"t\">Platnosci przez Stripe (opcjonalnie).</div></div>
       </div>
 
@@ -2311,9 +2323,9 @@ def dashboard(request: Request):
         <h3 style=\"margin:0 0 10px\">Plan i platnosci</h3>
         <div class=\"actions\">
           {free_action}
-          <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesieczna (249 zl)</a>
-          <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczna (2 690 zl)</a>
-          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiac.</span>
+          <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesięczną (249 zł)</a>
+          <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczną (2 690 zł)</a>
+          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiąc.</span>
         </div>
       </div>
     </div>
@@ -2718,8 +2730,8 @@ def form_for_client(token: str, request: Request):
         return HTMLResponse(layout("Błąd", body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=404)
 
     if not subscription_active(company):
-        msg = "Dostep jest czasowo zablokowany." if not ENABLE_FREE_PLAN else "Dostep wymaga aktywnego planu."
-        return HTMLResponse(layout("Dostep", body=f'<div class="wrap formwrap"><h1>Formularz niedostepny</h1><p class="muted">{msg}</p><a class="btn" href="/">Strona glowna</a></div>', nav=nav_links()), status_code=403)
+        msg = "Dostęp jest czasowo zablokowany." if not ENABLE_FREE_PLAN else "Dostęp wymaga aktywnego planu."
+        return HTMLResponse(layout("Dostęp", body=f'<div class="wrap formwrap"><h1>Formularz niedostępny</h1><p class="muted">{msg}</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
 
     submit_token = _new_submit_token()
     return HTMLResponse(render_form(
@@ -2749,7 +2761,7 @@ async def submit_form(token: str, request: Request):
         body = f"""
         <div class="wrap formwrap">
           <h1 style="margin:0 0 10px">Limit formularzy wyczerpany</h1>
-          <p class="lead">Limit miesieczny zostal wykorzystany dla tego planu.</p>
+          <p class="lead">Limit miesięczny został wykorzystany dla tego planu.</p>
           <div class="actions"><a class="btn" href="/">Strona główna</a></div>
         </div>
         """
