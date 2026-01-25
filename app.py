@@ -47,7 +47,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 
 # Email (Gmail SMTP często NIE działa na hostingu przez blokadę egress SMTP)
-BOT_EMAIL = os.getenv("BOT_EMAIL", "twoj.bot.architektoniczny@gmail.com").strip()
+BOT_EMAIL = os.getenv("BOT_EMAIL", "twój.bot.architektoniczny@gmail.com").strip()
 # App password od Google może mieć spacje -> usuwamy
 BOT_EMAIL_PASSWORD = (os.getenv("BOT_EMAIL_PASSWORD", "") or "").strip().replace(" ", "")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
@@ -65,6 +65,45 @@ STRIPE_PRICE_ID_YEARLY = os.getenv("STRIPE_PRICE_ID_YEARLY", "").strip()
 
 # DEV bypass (Render ENV ma: DEV_BYPASS_SUBSCRIPTION)
 DEV_BYPASS_SUBSCRIPTION = (os.getenv("DEV_BYPASS_SUBSCRIPTION", "false").lower() in ("1", "true", "yes", "y", "on"))
+
+
+# =========================
+# BRANDING: logo + favicon (inline SVG)
+# =========================
+
+LOGO_SVG = """<svg viewBox='0 0 64 64' width='22' height='22' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+  <path d='M20 50V30c0-7 5-12 12-12s12 5 12 12v20' stroke='#0b0f1a' stroke-width='6' stroke-linecap='round'/>
+  <path d='M18 50h28' stroke='#0b0f1a' stroke-width='6' stroke-linecap='round'/>
+  <circle cx='46' cy='18' r='4' fill='#0b0f1a'/>
+  <path d='M46 22v8' stroke='#0b0f1a' stroke-width='4' stroke-linecap='round'/>
+</svg>"""
+
+FAVICON_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+  <defs>
+    <linearGradient id='g' x1='8' y1='8' x2='56' y2='56' gradientUnits='userSpaceOnUse'>
+      <stop stop-color='#D6B36A'/>
+      <stop offset='1' stop-color='#B89443'/>
+    </linearGradient>
+  </defs>
+  <rect x='6' y='6' width='52' height='52' rx='18' fill='url(#g)'/>
+  <path d='M20 50V30c0-7 5-12 12-12s12 5 12 12v20' stroke='#0b0f1a' stroke-width='6' stroke-linecap='round'/>
+  <path d='M18 50h28' stroke='#0b0f1a' stroke-width='6' stroke-linecap='round'/>
+  <circle cx='46' cy='18' r='4' fill='#0b0f1a'/>
+  <path d='M46 22v8' stroke='#0b0f1a' stroke-width='4' stroke-linecap='round'/>
+</svg>"""
+
+def _svg_data_uri(svg: str) -> str:
+    # Minimalne kodowanie do data URI (bez dodatkowych zależności).
+    s = svg.strip().replace("\n", "")
+    s = s.replace('"', "'")
+    return ("data:image/svg+xml," +
+            s.replace("%", "%25")
+             .replace("#", "%23")
+             .replace("<", "%3C")
+             .replace(">", "%3E")
+             .replace(" ", "%20"))
+
+FAVICON_HREF = _svg_data_uri(FAVICON_SVG)
 
 
 # =========================
@@ -661,10 +700,10 @@ ENABLE_FREE_PLAN = (os.getenv("ENABLE_FREE_PLAN", "true").lower() in ("1", "true
 FREE_FORMS_PER_MONTH_LIMIT = int(os.getenv("FREE_FORMS_PER_MONTH_LIMIT", "3"))
 
 PLAN_LABELS = {
-    "free": "Beta 0 zl",
-    "monthly": "Miesieczny",
+    "free": "Beta 0 zł",
+    "monthly": "Miesięczny",
     "yearly": "Roczny",
-    "none": "Brak dostepu",
+    "none": "Brak dostępu",
 }
 
 def _company_plan(company: dict) -> str:
@@ -778,6 +817,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{esc(title)} • {APP_NAME}</title>
+  <link rel="icon" href="{FAVICON_HREF}"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -1042,7 +1082,7 @@ li {{ margin: 6px 0; }}
     <div class="wrap">
       <div class="nav">
         <div class="brand">
-          <div class="logo"></div>
+          <div class="logo">{LOGO_SVG}</div>
           <div>{esc(APP_NAME)}</div>
         </div>
         <div class="menu">
@@ -1079,7 +1119,7 @@ def nav_links() -> str:
     return """
       <a href="/#funkcje">Funkcje</a>
       <a href="/#raport">Raport</a>
-      <a href="/#jak">Jak dziala</a>
+      <a href="/#jak">Jak działa</a>
       <a href="/#cennik">Plany</a>
       <a href="/#faq">FAQ</a>
     """
@@ -1472,7 +1512,7 @@ def ai_report(form: Dict[str, Any], pricing_text: str, company: Dict[str, Any], 
         "Tworzysz: (1) raport wewnętrzny dla architekta oraz (2) gotową wiadomość do klienta do skopiowania.\n\n"
         "KRYTYCZNE ZASADY (bez wyjątków):\n"
         "- Raport jest NA PODSTAWIE FORMULARZA klienta. Nie mieszaj danych klienta z domysłami.\n"
-        "- Każdy fakt w polu 'facts' musi mieć source: client_form (z briefu) albo assumption (twoje założenie).\n"
+        "- Każdy fakt w polu 'facts' musi mieć source: client_form (z briefu) albo assumption (twóje założenie).\n"
         "- Jeśli brakuje danych do wyceny: podaj widełki i dopisz brak jako questions.blockers (nie zgaduj w ciszy).\n"
         "- Obiekt jest PRZEMYSŁOWY/LOGISTYCZNY: priorytet PPOŻ/BHP/technologia/logistyka/media.\n"
         "- Musisz wyliczyć: (a) koszt projektu na podstawie pricing_text, (b) szacunkowy koszt budowy (widełki) oraz wszystko uzasadnić w tabelach.\n"
@@ -1809,7 +1849,7 @@ def home():
 - Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
 - Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
 - Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
-- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
+- Mapa do celów projektowych i badania geotechniczne – złecane odrębnie (poza cennikiem).
 
 ---
 
@@ -1912,14 +1952,14 @@ franekstenzel@gmail.com"""
 
     free_card = """
             <div class=\"price\" style=\"border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)\" data-reveal>
-              <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zl</div>
-              <h3 style=\"margin:10px 0 0\">Beta (0 zl)</h3>
-              <div class=\"big\">0 zl</div>
-              <div class=\"muted\">Dla pierwszych wdrozen. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiac</b>.</div>
+              <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zł</div>
+              <h3 style=\"margin:10px 0 0\">Beta (0 zł)</h3>
+              <div class=\"big\">0 zł</div>
+              <div class=\"muted\">Dla pierwszych wdrozen. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiąc</b>.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
                 <li>Brief + raport</li>
-                <li>Limit """ + str(FREE_FORMS_PER_MONTH_LIMIT) + """ / miesiac</li>
+                <li>Limit """ + str(FREE_FORMS_PER_MONTH_LIMIT) + """ / miesiąc</li>
               </ul>
               <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn gold\" href=\"/register\">Odbierz dostep</a></div>
             </div>
@@ -1940,7 +1980,7 @@ franekstenzel@gmail.com"""
             </p>
             <div style=\"height:18px\"></div>
             <div class=\"cta\" style=\"justify-content:flex-start\">
-              <a class=\"btn gold\" href=\"/register\">Zaloz konto</a>
+              <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
               <a class=\"btn\" href=\"/demo\">Zobacz brief</a>
             </div>
             <div style=\"height:18px\"></div>
@@ -1956,7 +1996,7 @@ franekstenzel@gmail.com"""
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
               <div style=\"font-weight:900\">Blokery (P0)</div>
-              <div class=\"muted\">Brak MPZP/WZ, brak mocy przylaczeniowej, brak PPOZ, brak parametrow dokow.</div>
+              <div class=\"muted\">Brak MPZP/WZ, brak mocy przylaczeniowej, brak PPOŻ, brak parametrow dokow.</div>
             </div>
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
@@ -1978,9 +2018,9 @@ franekstenzel@gmail.com"""
           <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu dla projektow przemyslowych i jeden raport, ktory prowadzi wycene i doprecyzowanie zakresu.</p>
           <div style=\"height:18px\"></div>
           <div class=\"grid3\">
-            <div class=\"tile\" data-reveal><h3>Komplet pytan</h3><p>Formalne, media, grunt, technologia, logistyka, PPOZ/BHP, parametry obiektu.</p></div>
-            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujace dokumenty, niejasnosci do doprecyzowania.</p></div>
-            <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomosc: prosba o uzupelnienia + lista pytan krytycznych.</p></div>
+            <div class=\"tile\" data-reveal><h3>Komplet pytan</h3><p>Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
+            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujące dokumenty, niejasnosci do doprecyzowania.</p></div>
+            <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomość: prośba o uzupełnienia + lista pytan krytycznych.</p></div>
           </div>
         </div>
       </section>
@@ -1988,13 +2028,13 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"raport\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Raport demo</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Ponizej przykladowy fragment raportu. W produkcji trafia na mail architekta po zatwierdzeniu briefu.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Poniżej przykładowy fragment raportu. W produkcji trafia na mail architekta po zatwierdzeniu briefu.</p>
           <div style=\"height:18px\"></div>
           <div class=\"panel card\" data-reveal>
             <div class=\"codebox\">{esc(sample)}</div>
             <div class=\"actions\" style=\"margin-top:14px\">
-              <a class=\"btn gold\" href=\"/demo\">Wypelnij demo brief</a>
-              <a class=\"btn\" href=\"/register\">Zaloz konto</a>
+              <a class=\"btn gold\" href=\"/demo\">Wypełnij demo brief</a>
+              <a class=\"btn\" href=\"/register\">Załóż konto</a>
             </div>
           </div>
         </div>
@@ -2002,9 +2042,9 @@ franekstenzel@gmail.com"""
 
       <section class=\"slide\" id=\"jak\">
         <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to dziala</h1>
+          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to działa</h1>
           <div class=\"how\">
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektow (odbiorcy raportow) i opcjonalnie cennik wycen.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektów (odbiorcy raportow) i opcjonalnie cennik wycen.</p></div>
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 02</div><h3>Brief inwestora</h3><p>Inwestor wypelnia formularz. Puste pola sa dopuszczalne.</p></div>
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 03</div><h3>Raport</h3><p>AI sklada raport: braki, ryzyka, pytania, dokumenty, kroki.</p></div>
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 04</div><h3>Doprecyzowanie</h3><p>Masz gotowa liste do klienta - szybciej domykasz zakres i wycene.</p></div>
@@ -2015,33 +2055,33 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"cennik\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Plany</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Wersja produkcyjna ma plany platne przez Stripe. Jesli potrzebujesz: uruchom Beta 0 zl i testuj na realnych briefach.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Wersja produkcyjna ma plany płatne przez Stripe. Jeśli potrzebujesz: uruchom Beta 0 zł i testuj na realnych briefach.</p>
           <div style=\"height:18px\"></div>
           <div class=\"pricing\" style=\"grid-template-columns: repeat(3, 1fr);\">
             {free_card}
             <div class=\"price\" data-reveal>
-              <h3>Miesiecznie</h3>
-              <div class=\"big\">249 zl</div>
-              <div class=\"muted\">Dla pracowni, ktore chca rozliczenie miesieczne.</div>
+              <h3>Miesięcznie</h3>
+              <div class=\"big\">249 zł</div>
+              <div class=\"muted\">Dla pracowni, które chcą rozliczenie miesieczne.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
                 <li>Brief + raport</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiac</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
                 <li>Cennik firmy do wycen</li>
               </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Zaloz konto</a></div>
+              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
             <div class=\"price\" data-reveal>
               <h3>Rocznie</h3>
-              <div class=\"big\">2 690 zl</div>
+              <div class=\"big\">2 690 zł</div>
               <div class=\"muted\">Dla pracowni pracujacych w trybie ciaglym.</div>
               <ul>
                 <li>To samo co miesiecznie</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiac</li>
+                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
                 <li>Wsparcie wdrozeniowe</li>
                 <li>Odnowienia cykliczne</li>
               </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Zaloz konto</a></div>
+              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
           </div>
         </div>
@@ -2053,11 +2093,11 @@ franekstenzel@gmail.com"""
           <div class=\"panel card\" data-reveal>
             <p class=\"muted\"><b>Czy wszystkie pola musza byc wypelnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
             <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespolu projektowego.</p>
-            <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zl?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
+            <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zł?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
           </div>
           <div style=\"height:18px\"></div>
           <div class=\"cta\" style=\"justify-content:flex-start\" data-reveal>
-            <a class=\"btn gold\" href=\"/register\">Zaloz konto</a>
+            <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
             <a class=\"btn\" href=\"/login\">Zaloguj</a>
           </div>
         </div>
@@ -2233,14 +2273,14 @@ def dashboard(request: Request):
 
     free_action = ""
     if ENABLE_FREE_PLAN and plan not in ("monthly", "yearly"):
-        free_action = "<a class=\"btn\" href=\"/dashboard/plan/free\">Aktywuj Beta 0 zl</a>"
+        free_action = "<a class=\"btn\" href=\"/dashboard/plan/free\">Aktywuj Beta 0 zł</a>"
 
     body = f"""
     <div class=\"wrap formwrap\">
       <div style=\"display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap\">
         <div>
           <h1 style=\"margin:0 0 8px\">{esc(company.get('name'))}</h1>
-          <div class=\"muted\">Panel firmy • {badge('Dostep aktywny' if access_ok else 'Dostep zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
+          <div class=\"muted\">Panel firmy • {badge('Dostęp aktywny' if access_ok else 'Dostęp zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
         </div>
         <div style=\"display:flex;gap:10px;align-items:center;flex-wrap:wrap\">
           <a class=\"btn\" href=\"/demo\">Podglad briefu</a>
@@ -2291,7 +2331,7 @@ def dashboard(request: Request):
         <h3 style=\"margin:0 0 10px\">Architekci i linki do formularzy</h3>
         <form method=\"post\" action=\"/dashboard/architect/add\">
           <div class=\"fields\">
-            <div class=\"field\"><label>Imie / identyfikator</label><input name=\"name\" placeholder=\"np. Jan Kowalski\"/></div>
+            <div class=\"field\"><label>Imię / identyfikator</label><input name=\"name\" placeholder=\"np. Jan Kowalski\"/></div>
             <div class=\"field\"><label>Email architekta (na raport)</label><input type=\"email\" name=\"email\" placeholder=\"jan@pracownia.pl\"/></div>
           </div>
           <div class=\"actions\"><button class=\"btn gold\" type=\"submit\">Dodaj architekta</button></div>
@@ -2299,7 +2339,7 @@ def dashboard(request: Request):
 
         <div style=\"height:14px\"></div>
         <div class=\"grid3\" style=\"grid-template-columns: 1fr; gap: 12px;\">
-          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak architektow. Dodaj pierwszego powyzej.</div>'}
+          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak architektów. Dodaj pierwszego powyżej.</div>'}
         </div>
       </div>
 
@@ -2309,9 +2349,9 @@ def dashboard(request: Request):
         <h3 style=\"margin:0 0 10px\">Plan i platnosci</h3>
         <div class=\"actions\">
           {free_action}
-          <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesieczna (249 zl)</a>
-          <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczna (2 690 zl)</a>
-          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiac.</span>
+          <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesięczną (249 zł)</a>
+          <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczną (2 690 zł)</a>
+          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiąc.</span>
         </div>
       </div>
     </div>
@@ -2330,7 +2370,7 @@ def dashboard_set_free_plan(request: Request):
     company = get_company(request)
     assert company is not None
 
-    # Nie nadpisuj planu platnego
+    # Nie nadpisuj planu płatnego
     st = (company.get("stripe") or {}).get("status") or ""
     if st in ("active", "trialing"):
         return RedirectResponse(url="/dashboard", status_code=302)
@@ -2578,7 +2618,7 @@ async def demo_submit(request: Request):
 - Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
 - Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
 - Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
-- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
+- Mapa do celów projektowych i badania geotechniczne – złecane odrębnie (poza cennikiem).
 
 ---
 
@@ -2716,8 +2756,8 @@ def form_for_client(token: str, request: Request):
         return HTMLResponse(layout("Błąd", body='<div class="wrap formwrap"><h1>Nieprawidłowy link</h1><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=404)
 
     if not subscription_active(company):
-        msg = "Dostep jest czasowo zablokowany." if not ENABLE_FREE_PLAN else "Dostep wymaga aktywnego planu."
-        return HTMLResponse(layout("Dostep", body=f'<div class="wrap formwrap"><h1>Formularz niedostepny</h1><p class="muted">{msg}</p><a class="btn" href="/">Strona glowna</a></div>', nav=nav_links()), status_code=403)
+        msg = "Dostęp jest czasowo zablokowany." if not ENABLE_FREE_PLAN else "Dostęp wymaga aktywnego planu."
+        return HTMLResponse(layout("Dostęp", body=f'<div class="wrap formwrap"><h1>Formularz niedostepny</h1><p class="muted">{msg}</p><a class="btn" href="/">Strona główna</a></div>', nav=nav_links()), status_code=403)
 
     submit_token = _new_submit_token()
     return HTMLResponse(render_form(
@@ -2892,7 +2932,7 @@ async def stripe_webhook(request: Request):
         status = data.get("status", "") or ""
         db["companies"][company_id]["stripe"]["status"] = status
 
-        # Jesli subskrypcja aktywna, zachowaj/ustaw plan z metadata subskrypcji
+        # Jeśli subskrypcja aktywna, zachowaj/ustaw plan z metadata subskrypcji
         sub_meta = (data.get("metadata") or {})
         sub_plan = (sub_meta.get("plan") or "").strip().lower()
         if status in ("active", "trialing") and sub_plan in ("monthly", "yearly"):
