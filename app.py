@@ -1947,9 +1947,9 @@ franekstenzel@gmail.com"""
             <div class=\"kicker\">
               <span class=\"tag\"><span class=\"dot\"></span>Standaryzacja briefu inwestora</span>
             </div>
-            <h1>Brief inwestorski → raport brakow i ryzyk <span class=\"gold\">dla projektow przemyslowych</span></h1>
+            <h1>Brief inwestorski → raport braków i ryzyk <span class=\"gold\">dla projektów przemysłowych</span></h1>
             <p class=\"lead\">
-              Inwestor wypelnia formularz. Ty dostajesz raport: braki danych, ryzyka (P0/P1), pytania krytyczne i następne kroki.
+              Inwestor wypełnia  formularz. Ty dostajesz raport: braki danych, ryzyka (P0/P1), pytania krytyczne i następne kroki.
               Bez chaosu w mailach i bez wyceny na oślep.
             </p>
             <div style=\"height:18px\"></div>
@@ -1979,8 +1979,8 @@ franekstenzel@gmail.com"""
             </div>
             <div style=\"height:10px\"></div>
             <div class=\"stat\">
-              <div style=\"font-weight:900\">Nastepne kroki</div>
-              <div class=\"muted\">Lista dokumentow i pytan do inwestora (gotowa do wyslania).</div>
+              <div style=\"font-weight:900\">Następne kroki</div>
+              <div class=\"muted\">Lista dokumentów i pytań do inwestora (gotowa do wysłania).</div>
             </div>
           </div>
         </div>
@@ -1989,10 +1989,10 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"funkcje\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Funkcje</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu dla projektow przemyslowych i jeden raport, ktory prowadzi wycene i doprecyzowanie zakresu.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu dla projektow przemysłowych  i jeden raport, który prowadzi wycenę  i doprecyzowanie zakresu.</p>
           <div style=\"height:18px\"></div>
           <div class=\"grid3\">
-            <div class=\"tile\" data-reveal><h3>Komplet pytan</h3><p>Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
+            <div class=\"tile\" data-reveal><h3>Komplet pytań</h3><p>Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
             <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujące dokumenty, niejasności do doprecyzowania.</p></div>
             <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomość: prosba o uzupelnienia + lista pytan krytycznych.</p></div>
           </div>
@@ -2007,7 +2007,7 @@ franekstenzel@gmail.com"""
           <div class=\"panel card\" data-reveal>
             <div class=\"codebox\">{esc(sample)}</div>
             <div class=\"actions\" style=\"margin-top:14px\">
-              <a class=\"btn gold\" href=\"/demo\">Wypelnij demo brief</a>
+              <a class=\"btn gold\" href=\"/demo\">Wypełnij demo brief</a>
               <a class=\"btn\" href=\"/register\">Załóż konto</a>
             </div>
           </div>
@@ -2016,12 +2016,12 @@ franekstenzel@gmail.com"""
 
       <section class=\"slide\" id=\"jak\">
         <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to dziala</h1>
+          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to działa</h1>
           <div class=\"how\">
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektow (odbiorcy raportow) i opcjonalnie cennik wycen.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 02</div><h3>Brief inwestora</h3><p>Inwestor wypelnia formularz. Puste pola sa dopuszczalne.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektów (odbiorcy raportów) i opcjonalnie cennik wycen.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">ETAP 02</div><h3>Brief inwestora</h3><p>Inwestor wypełnia formularz. Puste pola sa dopuszczalne.</p></div>
             <div class=\"step\" data-reveal><div class=\"k\">ETAP 03</div><h3>Raport</h3><p>AI sklada raport: braki, ryzyka, pytania, dokumenty, kroki.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 04</div><h3>Doprecyzowanie</h3><p>Masz gotowa liste do klienta - szybciej domykasz zakres i wycene.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">ETAP 04</div><h3>Doprecyzowanie</h3><p>Masz gotowa liste do klienta - szybciej domykasz zakres i wycenę .</p></div>
           </div>
         </div>
       </section>
@@ -2065,7 +2065,7 @@ franekstenzel@gmail.com"""
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>FAQ</h1>
           <div class=\"panel card\" data-reveal>
-            <p class=\"muted\"><b>Czy wszystkie pola musza byc wypelnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
+            <p class=\"muted\"><b>Czy wszystkie pola musza byc wypełnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
             <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespolu projektowego.</p>
             <p class=\"muted\"><b>Czy moge wylaczyc plan 0 zł?</b><br/>Tak. Ustaw w ENV: <code>ENABLE_FREE_PLAN=false</code>.</p>
           </div>
@@ -2631,15 +2631,15 @@ async def demo_submit(request: Request):
 ## 8) Założenia (jawne)
 - Szacunek kosztów budowy oparty o standard wykonania „Standard” i region „Mniejsze miasto/okolice” – brak wskazania w briefie.
 - Jednostkowe widełki dla pozycji z oznaczeniem „od … PLN” (analiza chłonności, due diligence, operat ppoż.) przyjęto orientacyjnie do górnego zakresu kosztów (nie stanowi oferty).
-- Wycena projektowa przyjęta jako „Projekt wielobranżowy – komplet (PB+PT+PW)”, aby uniknąć dublowania pozycji PB i PW.
-- Mapa do celów projektowych i badania geotechniczne poza zakresem cennika – koszty po stronie zewnętrznych dostawców.
+- Wycena projektówa przyjęta jako „Projekt wielobranżowy – komplet (PB+PT+PW)”, aby uniknąć dublowania pozycji PB i PW.
+- Mapa do celów projektówych i badania geotechniczne poza zakresem cennika – koszty po stronie zewnętrznych dostawców.
 - BIM traktowany jako opcja (+20% do projektu) – w bazowej kalkulacji nie ujęto.
 - Nadzór autorski i Inwestor Zastępczy – pozycje opcjonalne, poza bazową sumą.
 
 ---
 
 ## 9) Następne kroki
-- Podpisanie NDA i przekazanie dokumentów: MPZP (wypis/wyrys), geotechnika, warunki przyłączeniowe, mapa do celów projektowych.
+- Podpisanie NDA i przekazanie dokumentów: MPZP (wypis/wyrys), geotechnika, warunki przyłączeniowe, mapa do celów projektówych.
 - Warsztaty funkcjonalno-technologiczne (2–3 h) z kierownikiem produkcji i BHP/PPOŻ – doprecyzowanie layoutu, suwnicy i stref poż.
 - Decyzja dot. mroźni: czy występuje i w jakim zakresie – jeśli tak, przygotujemy wariant instalacyjny.
 - Potwierdzenie liczby doków i parametrów placów manewrowych; wstępny masterplan z rezerwą pod rozbudowę.
@@ -2682,7 +2682,7 @@ Kluczowe czynniki kosztowe: suwnica i obciążenia 50 kN/m², potencjalna mroźn
 - Standard wykończenia biur i socjalnych.
 
 4) Proponowane kolejne kroki:
-- Podpisanie NDA i przekazanie dokumentów (MPZP, geotechnika, warunki przyłączenia, mapa do celów projektowych).
+- Podpisanie NDA i przekazanie dokumentów (MPZP, geotechnika, warunki przyłączenia, mapa do celów projektówych).
 - Krótki warsztat funkcjonalno-technologiczny (online) – doprecyzowanie layoutu i kluczowych parametrów.
 - Aktualizacja koncepcji i kosztorysu inwestorskiego po uzgodnieniach.
 
@@ -2818,7 +2818,7 @@ async def submit_form(token: str, request: Request):
     body = """
     <div class="wrap formwrap">
       <h1 style="margin:0 0 10px">Dziękujemy.</h1>
-      <p class="lead">Brief został przekazany do opracowania. Zespół projektowy skontaktuje się w razie potrzeby uzupełnień.</p>
+      <p class="lead">Brief został przekazany do opracowania. Zespół projektówy skontaktuje się w razie potrzeby uzupełnień.</p>
       <div class="actions">
         <a class="btn" href="/">Strona główna</a>
       </div>
