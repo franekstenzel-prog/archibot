@@ -1960,8 +1960,8 @@ franekstenzel@gmail.com"""
             <div style=\"height:18px\"></div>
             <div class=\"grid3\" style=\"grid-template-columns: repeat(3, 1fr);\">
               <div class=\"stat\" data-reveal><div class=\"k\">CO DOSTAJESZ</div><div class=\"n\">Raport</div><div class=\"t\">Braki, ryzyka, pytania, kroki.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">DLA KOGO</div><div class=\"n\">Przemysl</div><div class=\"t\">Hale, magazyny, logistyka.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">DLACZEGO</div><div class=\"n\">Wycena</div><div class=\"t\">Mniej niedopowiedzen i ryzyk.</div></div>
+              <div class=\"stat\" data-reveal><div class=\"k\">DLA KOGO</div><div class=\"n\">Przemysł</div><div class=\"t\">Hale, magazyny, logistyka.</div></div>
+              <div class=\"stat\" data-reveal><div class=\"k\">DLACZEGO</div><div class=\"n\">Wycena</div><div class=\"t\">Mniej niedopowiedzeń i ryzyk.</div></div>
             </div>
           </div>
 
