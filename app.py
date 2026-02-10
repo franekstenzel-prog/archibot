@@ -708,6 +708,16 @@ def _increment_forms_sent(db: Dict[str, Any], company_id: str) -> None:
     _ensure_usage_period(c)
     c["usage"]["forms_sent"] = int(c["usage"].get("forms_sent") or 0) + 1
 
+
+def _add_report(db: Dict[str, Any], company_id: str, record: Dict[str, Any], max_keep: int = 30) -> None:
+    """Przechowuj ostatnie raporty w DB (pod panel + dowody wysyłki)."""
+    c = db["companies"][company_id]
+    reports = c.get("reports") or []
+    if not isinstance(reports, list):
+        reports = []
+    reports.insert(0, record)
+    c["reports"] = reports[:max_keep]
+
 def _new_submit_token() -> str:
     return secrets.token_urlsafe(16)
 
@@ -972,10 +982,58 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     .big {{ font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 8px; }}
 
     .foot {{
-          padding: 26px 0 60px;
-          color: rgba(238,242,255,0.55);
-          border-top: 1px solid rgba(255,255,255,0.06);
-        }}
+      padding: 34px 0 56px;
+      color: rgba(238,242,255,0.62);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      margin-top: 40px;
+    }}
+    .footgrid {{
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }}
+    .footlinks {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+    }}
+    .footlinks a {{
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      color: rgba(238,242,255,0.70);
+      font-weight: 800;
+      font-size: 12px;
+    }}
+    .footlinks a:hover {{
+      background: rgba(255,255,255,0.06);
+      color: rgba(238,242,255,0.86);
+    }}
+    .cookie {{
+      position: fixed;
+      left: 14px;
+      right: 14px;
+      bottom: 14px;
+      z-index: 80;
+      box-shadow: var(--shadow);
+    }}
+    .cookie-inner {{
+      width: min(1120px, calc(100% - 18px));
+      margin: 0 auto;
+      padding: 14px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }}
+    .cookie-inner .muted a {{
+      text-decoration: underline;
+    }}
+
 
     .how {{
           display:grid;
@@ -1035,6 +1093,9 @@ li {{ margin: 6px 0; }}
       .hero {{ grid-template-columns: 1fr; }}
       .grid3 {{ grid-template-columns: 1fr; }}
       .fields {{ grid-template-columns: 1fr; }}
+      .footgrid {{ grid-template-columns: 1fr; }}
+      .footlinks {{ justify-content: flex-start; }}
+      .cookie-inner {{ flex-direction: column; align-items: stretch; }}
     }}
   </style>
 </head>
@@ -1058,6 +1119,32 @@ li {{ margin: 6px 0; }}
     </div>
   </div>
   {body}
+  <div class="foot">
+    <div class="wrap footgrid">
+      <div>
+        <div style="font-weight:900">© {esc(APP_NAME)} • {esc(datetime.datetime.utcnow().year)}</div>
+        <div class="muted" style="margin-top:6px">Brief → raport braków i ryzyk dla projektów przemysłowych.</div>
+      </div>
+      <div class="footlinks">
+        <a href="/legal/terms">Regulamin</a>
+        <a href="/legal/privacy">Prywatność</a>
+        <a href="/legal/cookies">Cookies</a>
+        <a href="/contact">Kontakt</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="cookie-banner" class="cookie panel" style="display:none">
+    <div class="cookie-inner">
+      <div class="muted" style="flex:1">
+        Używamy wyłącznie niezbędnych cookies do logowania i działania panelu.
+        <a href="/legal/cookies">Dowiedz się więcej</a>.
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; justify-content:flex-end;">
+        <button class="btn gold" id="cookie-ok" type="button">OK</button>
+      </div>
+    </div>
+  </div>
 <script>
 (() => {{
   const els = Array.from(document.querySelectorAll('[data-reveal]'));
@@ -1070,6 +1157,23 @@ li {{ margin: 6px 0; }}
     }}
   }}, {{ threshold: 0.12 }});
   els.forEach(el => {{ el.classList.add('reveal'); io.observe(el); }});
+}})();
+
+(() => {{
+  const key = "archibot_cookie_ok_v1";
+  const banner = document.getElementById("cookie-banner");
+  if (!banner) return;
+  try {{
+    if (localStorage.getItem(key) === "1") return;
+  }} catch (e) {{}}
+  banner.style.display = "block";
+  const btn = document.getElementById("cookie-ok");
+  if (btn) {{
+    btn.addEventListener("click", () => {{
+      try {{ localStorage.setItem(key, "1"); }} catch (e) {{}}
+      banner.style.display = "none";
+    }});
+  }}
 }})();
 </script>
 </body>
@@ -1693,247 +1797,30 @@ def flash_html(msg: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    sample = """
-# RAPORT DLA ARCHITEKTA (przemysł) – ARCHITEKTONICZNE STUDIO HUBERT STENZEL
-
-**Projekt:** Hala Produkcyjno-Magazynowa JK1
-**Klient:** Janusz Kowalski Development Sp. z o.o.
-**Lokalizacja:** Park Przemysłowy Nowa Strefa, Gmina X
-**Architekt:** Franek <franekstenzel@gmail.com>
-
----
-
-## 1) Streszczenie
-- Raport przygotowany **na podstawie formularza klienta**. Każdy wpis ma źródło: `client_form` lub `assumption`.
-- Obiekt: przemysł/logistyka – priorytety: PPOŻ, BHP, technologia, logistyka, media.
-
----
-
-## 2) Dane wejściowe z formularza (tabela)
-| Sekcja | Parametr | Wartość | Źródło | Pewność |
-| --- | --- | --- | --- | --- |
-| A. Inwestor | Nazwa inwestora / spółki | Janusz Kowalski Development Sp. z o.o. | client_form | 0.99 |
-| A. Inwestor | Osoba kontaktowa | Janusz Kowalski, Prezes Zarządu / Inwestor | client_form | 0.99 |
-| A. Inwestor | Kto podejmuje decyzje projektowe? | Zarząd (Prezes) – decyzje strategiczne; operacyjne delegowane do PM po stronie inwestora; kluczowe etapy wymagają akceptacji Zarządu. | client_form | 0.9 |
-| A. Inwestor | Proces akceptacji | Cotygodniowe spotkania online, akceptacje do 72h, odbiory etapowe. | client_form | 0.9 |
-| A. Inwestor | Interesariusze po stronie inwestora | BHP – zewnętrzny doradca; PPOŻ – rzeczoznawca; Technologia – kierownik produkcji; IT – zewnętrzny dostawca; FM – przyszły facility manager; Audyt – audytor korporacyjny. | client_form | 0.9 |
-| B. Inwestycja | Charakter inwestycji | Nowy obiekt | client_form | 0.99 |
-| B. Inwestycja | Typ obiektu | Hala produkcyjna (produkcyjno-magazynowa) | client_form | 0.99 |
-| B. Inwestycja | Cel inwestycji / KPI | Nowy zakład produkcyjny komponentów metalowych; praca 2-zmianowa; skalowalność +30% w 5 lat. | client_form | 0.9 |
-| B. Inwestycja | Horyzont użytkowania | 25 lat | client_form | 0.9 |
-| B. Inwestycja | Rozbudowa/etapowanie | Tak – rozbudowa w przyszłości, wysoka elastyczność | client_form | 0.9 |
-| B. Inwestycja | Porażka inwestycji – definicja | Brak możliwości rozbudowy, ograniczenia energetyczne, niedostosowanie do przyszłych linii. | client_form | 0.9 |
-| C. Działka | Lokalizacja | Park Przemysłowy Nowa Strefa, Gmina X; działki 123/4, 123/5; pow. 28 000 m² | client_form | 0.99 |
-| C. Działka | Status własności | Własność inwestora | client_form | 0.99 |
-| C. Działka | Ograniczenia / ryzyka środowiskowe | Brak linii WN, brak stref zalewowych; teren płaski 1–2% spadku; brak drzew kolidujących. | client_form | 0.9 |
-| D. Geotechnika | Opinia geotechniczna | Posiadana; grunt: glina; wody gruntowe >5 m p.p.t.; nośność dobra. | client_form | 0.95 |
-| E. Formalności | Podstawa planistyczna | MPZP; wypis i wyrys posiadane. | client_form | 0.95 |
-| E. Formalności | Decyzja środowiskowa | Status: nie wiem (do potwierdzenia). | client_form | 0.7 |
-| F. Media | Warunki przyłączenia mediów | EE, woda, kanalizacja sanitarna, gaz, MEC – warunki posiadane. | client_form | 0.9 |
-| F. Media | Zasilanie / moc | Własna stacja trafo; moc teraz 500 kW, rezerwa 800 kW. | client_form | 0.95 |
-| F. Media | Woda/ścieki/opadowe | Woda – studnia; ścieki – zbiornik bezodpływowy; deszczówka – zbiornik retencyjny. | client_form | 0.9 |
-| G. Program | Powierzchnie funkcjonalne | PU 8 500 m²: produkcja 4 500; magazyn 2 500; wysyłka 800; biura 500; socjal 200. | client_form | 0.99 |
-| H. Technologia | Proces produkcyjny – opis | Dostawa → magazyn → obróbka → montaż → pakowanie → wysyłka. | client_form | 0.9 |
-| H. Technologia | Warunki procesu / zagrożenia | Hałas 70–80 dB(A); pylenie wysokie (>5 mg/m³); zagrożenia: chemikalia; wymagania temperaturowe: mroźnia (do potwierdzenia). | client_form | 0.75 |
-| I. Parametry | Kondygnacje / dach | Hala 1 kond.; biura 2 kond.; dach dwuspadowy. | client_form | 0.95 |
-| I. Parametry | Suwnica | Tak – suwnica przewidziana (parametry do ustalenia). | client_form | 0.85 |
-| J. Posadzka | Obciążenia posadzki | 50 kN/m²; standardowa posadzka przemysłowa. | client_form | 0.9 |
-| K. Logistyka | Strefa załadunku | Rampa + 6–10 doków; dostawy 24/7; wózki LPG; regały wysokiego składowania. | client_form | 0.9 |
-| M. Instalacje | Ogrzewanie / wentylacja | Ogrzewanie: sieć ciepłownicza; wentylacja: mechaniczna. | client_form | 0.9 |
-| N. PPOŻ | PPOŻ – dane | Sprinkler: nie wiem; obciążenie ogniowe Q ≤ 500 MJ/m². | client_form | 0.8 |
-| P. Organizacja | Tryb pracy | Ruch ciągły 24/7; poziom bezpieczeństwa wysoki (strefy krytyczne). | client_form | 0.9 |
-| R. Standardy | Wymagania korporacyjne | ISO 9001; BIM – opcjonalnie; NDA wymagane. | client_form | 0.9 |
-
----
-
-## 3) Pytania / RFI
-**Blockery (bez tego nie domykamy wyceny / zakresu):**
-- Potwierdzenie, czy faktycznie wymagana jest mroźnia w procesie produkcji komponentów metalowych (to istotnie zmienia instalacje, przegrody i koszty).
-- Parametry suwnicy: udźwig [t], rozpiętość, ilość torów, strefy pracy, wymagana wysokość podhacznikowa.
-- Wysokość hali w świetle oraz siatka słupów (wymagana vs. dopuszczalna) – wpływ na regały i logistykę.
-- Czy wymagana jest instalacja tryskaczowa (FM/VS) – jeżeli tak, jaka klasa ryzyka i źródło wody pożarowej?
-- Decyzja środowiskowa: czy wymagane jest postępowanie OOŚ (screening) – prosimy o stanowisko organu/eksperta.
-- Dane do składowania/obsługi chemikaliów: rodzaje, ilości, ADR, magazynowanie (regały, kuwetowanie), wentylacja i retencja rozlewów.
-- Warunki przyłączenia – prosimy o skany: EE, gaz, woda, kanalizacja, MEC; w szczególności dostępność mocy 800 kW w horyzoncie rozbudowy.
-- Rozwiązanie dla Internetu/światłowodu – dostępność operatora, wymagania IT/OT.
-- Zatwierdzenie źródeł wody (studnia) i ścieków (zbiornik bezodpływowy) – konieczne pozwolenia wodnoprawne/zgłoszenia?
-- Liczba i parametry doków (6, 8 czy 10?) oraz typy ramp/bram; układ dróg pożarowych i TIR.
-- Standard wykończenia biur i socjalnych (materiały, HVAC, fit-out).
-
-**Ważne (wpływ na budżet / terminy / ryzyka):**
-- Preferowany model realizacji: D&B czy tradycyjny (projekt + przetarg + budowa)?
-- Plan rezerw pod rozbudowę: kierunek i minimalny bufor na działce (m², układ dróg/mediów pod etapowanie).
-- Wymogi FM/serwisu dla 24/7 (strefowanie, dostęp serwisowy, redundancje).
-- Czy wymagane są audyty/dokumentacja pod ISO 9001 na etapie projektu i uruchomienia?
-- Poziom automatyzacji magazynu (WMS, pętla indukcyjna, VNA) i wymagania pod posadzkę/znaczniki.
-- Docelowa temperatura/warunki w strefach (produkcja, magazyn, wysyłka, biura).
-- Wymagania BHP dla pyłów: system odpylania, filtry, ATEX – potwierdzenie braku ATEX.
-
-**Opcjonalne:**
-- Czy przewidziane jest BIM (LOD 300–400) – jeśli tak, +20% do ceny projektu.
-- Czy oczekiwany jest Inwestor Zastępczy (2,5–4% kosztów)?
-- Zakres nadzoru autorskiego: ryczałt wizyt vs. % od inwestycji.
-- Wymagania ESG (np. PV na dachu, BREEAM/LEED) – mogą wpływać na projekt i koszty.
-
----
-
-## 4) Braki dokumentów / formalności
-- Wypis i wyrys MPZP – kopia do teczki projektowej.
-- Opinia geotechniczna – pełny dokument (PDF) z wierceniami i wnioskami.
-- Warunki przyłączenia: EE, woda, kanalizacja, gaz, MEC – kopie.
-- Mapa do celów projektowych 1:500 oraz mapa zasadnicza.
-- Badania hydro – jeśli planowana studnia/zbiornik retencyjny – decyzje/pozwolenia wodnoprawne (jeśli już są).
-- Inwentaryzacja zieleni (jeśli wymagana do zgłoszeń).
-- Wstępny layout technologiczny (URS) z danymi o maszynach, emisjach, mediami procesowymi.
-- Założenia dla suwnicy (karta techniczna/wytyczne).
-- Wytyczne FM/IT (sieć strukturalna, CCTV, kontrola dostępu).
-- Polityka bezpieczeństwa/ochrona – strefowanie, ogrodzenie, kontrola dostępu.
-
----
-
-## 5) Wycena projektu (kalkulacja + uzasadnienie)
-**Podstawa interpretacji cennika:** Ceny netto wg cennika (bez VAT 23%). Wariant: projekt wielobranżowy (komplet PB+PT+PW) + prace przedprojektowe i operat ppoż. Widełki wynikają z stawek jednostkowych i pozycji 'od ... PLN'. Pozycje OOŚ, nadzór autorski, projekt technologii – poza sumą (TBD).
-
-| Pozycja | Baza | Ilość | Jedn. | Stawka [PLN] | Kwota [PLN] | Źródło | Uzasadnienie |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Analiza chłonności terenu – LOW | Ryczałt od 3 500 PLN | 1 | ryczałt | 3 500 | 3 500 | pricing_text | Minimalna stawka katalogowa. |
-| Analiza chłonności terenu – HIGH | Zakres rozszerzony (spotkania/warianty) | 1 | ryczałt | 6 000 | 6 000 | assumption | Możliwy większy nakład prac przy etapowaniu/rozbudowie. |
-| Koncepcja architektoniczna – LOW | 10 PLN/m² | 8500 | m² | 10 | 85 000 | pricing_text | Wizualizacje, rzuty, bilans terenu – wariant podstawowy. |
-| Koncepcja architektoniczna – HIGH | 20 PLN/m² | 8500 | m² | 20 | 170 000 | pricing_text | Więcej wariantów, koordynacje międzybranżowe. |
-| Audyt techniczny działki (Due Diligence) – LOW | od 4 000 PLN | 1 | ryczałt | 4 000 | 4 000 | pricing_text | Przegląd formalny, uzbrojenie, ograniczenia. |
-| Audyt techniczny działki (Due Diligence) – HIGH | rozszerzony zakres | 1 | ryczałt | 8 000 | 8 000 | assumption | Dodatkowe wizje lokalne/uzgodnienia. |
-| Projekt wielobranżowy (komplet PB+PT+PW) – LOW | 90 PLN/m² | 8500 | m² | 90 | 765 000 | pricing_text | Architektura, konstrukcja, instalacje wew./zew. – zakres podstawowy. |
-| Projekt wielobranżowy (komplet PB+PT+PW) – HIGH | 150 PLN/m² | 8500 | m² | 150 | 1 275 000 | pricing_text | Złożoność: suwnica, wys. obciążenia, możliwa mroźnia/chemikalia. |
-| Operat przeciwpożarowy – LOW | od 5 000 PLN | 1 | ryczałt | 5 000 | 5 000 | pricing_text | Operat + uzgodnienia z rzeczoznawcą ppoż. |
-| Operat przeciwpożarowy – HIGH | rozszerzony zakres | 1 | ryczałt | 10 000 | 10 000 | assumption | Większa liczba stref pożarowych/uzgodnień. |
-| Analiza oddziaływania na środowisko (OŚ) – OPCJA | od 8 000 PLN | 1 | ryczałt | 8 000 | 8 000 | pricing_text | Tylko jeśli organ nakaże OOŚ – poza sumą (TBD). |
-| Nadzór autorski – OPCJA | 500 PLN/wizyta lub 1–2% CAPEX | 12 | wizyta | 500 | 6 000 | pricing_text | Model rozliczenia do uzgodnienia – poza sumą (TBD). |
-
-**Suma (widełki):** 862 500 – 1 469 000 PLN
-
-**W zakresie:**
-- Analiza chłonności terenu.
-- Koncepcja architektoniczna (wstępna).
-- Projekt wielobranżowy komplet: PB+PT+PW (architektura, konstrukcja, instalacje wewnętrzne i zewnętrzne do granicy działki).
-- Operat przeciwpożarowy i uzgodnienia ppoż/BHP/sanepid.
-
-**Poza zakresem:**
-- Wniosek o WZ (nie dotyczy – MPZP).
-- Projekt technologii przemysłowej/linii – wycena indywidualna (po wytycznych technologa).
-- Decyzja środowiskowa i raport OOŚ – jeśli wymagane przez organ (TBD).
-- Nadzór autorski ryczałt/procent – do uzgodnienia (TBD).
-- Inwestor Zastępczy (2,5–4% kosztów) – usługa opcjonalna.
-- Mapa do celów projektowych i badania geotechniczne – zlecane odrębnie (poza cennikiem).
-
----
-
-## 6) Średni koszt budowy (widełki + czynniki)
-| Standard | Region | PLN/m² low | PLN/m² mid | PLN/m² high | Total low | Total mid | Total high |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Standard | Mniejsze miasto / okolice | 5 400 | 6 000 | 6 900 | 45 900 000 | 51 000 000 | 58 650 000 |
-
-**Czynniki kosztotwórcze:**
-- Suwnica – wzrost tonażu konstrukcji, wzmocnienia podtorzy.
-- Wysokie obciążenia posadzki (50 kN/m²) – zbrojenie/technologia posadzki, dylatacje.
-- Regały wysokiego składowania – wpływ na wysokość hali, instalacje tryskaczowe (jeśli będą).
-- Możliwe wymagania mroźni – izolacje termiczne, chłodnictwo, szczelność przegród (do potwierdzenia).
-- Chemikalia i wysokie pylenie – instalacje wentylacji/odpylania, separacja stref, retencja rozlewów.
-- Zasilanie własną stacją trafo – CAPEX przyłącza/GPZ, rezerwy mocy.
-- Ścieki do zbiornika bezodpływowego i retencja deszczówki – dodatkowa infrastruktura zewnętrzna.
-- Tryb 24/7 i wysoki poziom bezpieczeństwa – systemy SSWiN, CCTV, KD, redundancje HVAC/EE.
-- 6–10 doków i rampa – place manewrowe, nawierzchnie o podwyższonej nośności.
-
----
-
-## 7) Ryzyka / uwagi architekta (tabela)
-| Obszar | Priorytet | Ryzyko | Skutek | Mitigacja / co sprawdzić |
-| --- | --- | --- | --- | --- |
-| PPOŻ | P0 | Brak decyzji nt. tryskaczy i klasy odporności pożarowej; chemikalia w procesie. | Możliwe przeprojektowania, wzrost kosztów instalacji/gromadzenia wody ppoż. | Wczesne uzgodnienia z rzeczoznawcą ppoż.; analiza Q, scenariusze pożarowe; decyzja o sprinkler/FM. |
-| BHP | P1 | Wysokie pylenie i hałas 70–80 dB(A). | Ryzyko niezgodności z NDS/PN, konieczność kosztownych systemów odpylania/wyciszeń. | Projekt systemów odpylania, separacja źródeł hałasu, strefy ruchu pieszych, audyt BHP. |
-| Technologia | P0 | Brak szczegółowego layoutu linii i wymagań mediów procesowych. | Ryzyko kolizji międzybranżowych i zmiany konstrukcji/instalacji na późnym etapie. | Warsztaty z kier. produkcji; zamrożenie URS/URS-M na etapie koncepcji; rezerwy w posadzce/kanale mediów. |
-| Logistyka | P1 | Niedookreślona liczba doków i parametry ruchu TIR/OSD. | Niewystarczająca przepustowość, zatory, konieczność rozbudowy placów. | Analizy przepustowości, symulacje ruchu, docelowy masterplan z etapowaniem. |
-| Media | P0 | Niepewność co do dostępności 800 kW w horyzoncie rozbudowy. | Ograniczenie mocy – ryzyko braku skalowalności. | Wnioski do OSD o rezerwę mocy; projekt stacji trafo pod 800 kW; miejsce na drugie trafo. |
-| Konstrukcja | P1 | Suwnica + 50 kN/m² – zwiększone obciążenia na fundamenty i słupy. | Wyższy CAPEX, możliwe zmiany siatki słupów/wysokości. | Wczesne obliczenia statyczne, definicja parametrów suwnicy, próby podłoża pod torowiska. |
-| Formalne | P1 | Możliwa konieczność OOŚ/pozwoleń wodnoprawnych (studnia, retencja, zbiornik). | Wydłużenie procedur, warunki środowiskowe dla eksploatacji. | Screening środowiskowy; konsultacja z RDOŚ/Wodami Polskimi; harmonogram decyzji. |
-| Środowisko | P2 | Zbiornik bezodpływowy – ryzyko pojemności/wywozu; retencja deszczówki – wymiarowanie. | Koszty operacyjne i inwestycyjne, ewentualne rozbudowy zbiorników. | Bilans ścieków/deszczówki, analiza opadów, przewymiarowanie na etapowanie. |
-
----
-
-## 8) Założenia (jawne)
-- Szacunek kosztów budowy oparty o standard wykonania „Standard” i region „Mniejsze miasto/okolice” – brak wskazania w briefie.
-- Jednostkowe widełki dla pozycji z oznaczeniem „od … PLN” (analiza chłonności, due diligence, operat ppoż.) przyjęto orientacyjnie do górnego zakresu kosztów (nie stanowi oferty).
-- Wycena projektowa przyjęta jako „Projekt wielobranżowy – komplet (PB+PT+PW)”, aby uniknąć dublowania pozycji PB i PW.
-- Mapa do celów projektowych i badania geotechniczne poza zakresem cennika – koszty po stronie zewnętrznych dostawców.
-- BIM traktowany jako opcja (+20% do projektu) – w bazowej kalkulacji nie ujęto.
-- Nadzór autorski i Inwestor Zastępczy – pozycje opcjonalne, poza bazową sumą.
-
----
-
-## 9) Następne kroki
-- Podpisanie NDA i przekazanie dokumentów: MPZP (wypis/wyrys), geotechnika, warunki przyłączeniowe, mapa do celów projektowych.
-- Warsztaty funkcjonalno-technologiczne (2–3 h) z kierownikiem produkcji i BHP/PPOŻ – doprecyzowanie layoutu, suwnicy i stref poż.
-- Decyzja dot. mroźni: czy występuje i w jakim zakresie – jeśli tak, przygotujemy wariant instalacyjny.
-- Potwierdzenie liczby doków i parametrów placów manewrowych; wstępny masterplan z rezerwą pod rozbudowę.
-- Screening środowiskowy (czy wymagane OOŚ) + wstępne uzgodnienia wodnoprawne (studnia, retencja, zbiornik).
-- Aktualizacja koncepcji i kosztorysu inwestorskiego (CAPEX) po doprecyzowaniu kluczowych założeń.
-- Uzgodnienie trybu współpracy (D&B vs. tradycyjny), kalendarz spotkań i kamieni milowych.
-
----
-
-## 10) Wiadomość do klienta (copy/paste)
-**Temat:** Hala Produkcyjno-Magazynowa JK1 – podsumowanie briefu, widełki kosztów i pytania kluczowe
-
-```text
-Szanowny Panie Prezesie,
-
-Dziękujemy za wypełnienie briefu dla projektu „Hala Produkcyjno-Magazynowa JK1”. Poniżej przesyłamy podsumowanie oraz proponowane kolejne kroki.
-
-1) Zakres i wstępne widełki kosztów projektu (netto):
-- Analiza chłonności terenu: 3 500 – 6 000 PLN (ryczałt).
-- Koncepcja architektoniczna: 10–20 PLN/m² → 85 000 – 170 000 PLN.
-- Projekt wielobranżowy (komplet PB+PT+PW): 90–150 PLN/m² → 765 000 – 1 275 000 PLN.
-- Operat ppoż.: 5 000 – 10 000 PLN.
-- Audyt techniczny działki (Due Diligence): 4 000 – 8 000 PLN.
-Suma orientacyjna (bazowy zakres, bez VAT): ok. 862 500 – 1 469 000 PLN.
-Pozycje opcjonalne (poza sumą): Analiza oddziaływania na środowisko (od 8 000 PLN – jeśli organ tego wymaga), Nadzór Autorski (500 PLN/wizyta lub 1–2% wartości inwestycji), projekt technologii linii (wycena indywidualna).
-
-2) Szacunek kosztów realizacji (CAPEX, standard „Standard”, lokalizacja: mniejsze miasto – założenia robocze):
-- 5 400 – 6 900 PLN/m²; przy 8 500 m² daje to ok. 45,9 – 58,65 mln PLN netto.
-Kluczowe czynniki kosztowe: suwnica i obciążenia 50 kN/m², potencjalna mroźnia, chemikalia i odpylanie, liczba doków 6–10, własna stacja trafo, retencja i zbiornik bezodpływowy, tryb 24/7.
-
-3) Pytania blokujące (prosimy o odpowiedź/załączniki):
-- Czy faktycznie wymagana jest mroźnia w procesie (dla komponentów metalowych)? Jeśli tak – jakie parametry?
-- Parametry suwnicy: udźwig, rozpiętość, ilość torów, wysokość podhacznikowa.
-- Wysokość hali w świetle oraz oczekiwana siatka słupów.
-- Czy wymagany będzie sprinkler (i jaka klasa ryzyka)?
-- Decyzja środowiskowa/OOŚ – czy była wstępna konsultacja z organem?
-- Skany warunków przyłączenia (EE, gaz, woda, kanalizacja, MEC) + informacja o rezerwie 800 kW.
-- Dane o chemikaliach (rodzaje, ilości, sposób magazynowania, ADR) i wymogi BHP dla pyłów.
-- Liczba doków docelowo (6/8/10) i założenia dla placów manewrowych.
-- Standard wykończenia biur i socjalnych.
-
-4) Proponowane kolejne kroki:
-- Podpisanie NDA i przekazanie dokumentów (MPZP, geotechnika, warunki przyłączenia, mapa do celów projektowych).
-- Krótki warsztat funkcjonalno-technologiczny (online) – doprecyzowanie layoutu i kluczowych parametrów.
-- Aktualizacja koncepcji i kosztorysu inwestorskiego po uzgodnieniach.
-
-Jesteśmy gotowi rozpocząć od Analizy Chłonności i Koncepcji. Proszę o informację dot. dostępnych terminów na warsztat oraz o dosłanie ww. dokumentów.
-
-Z wyrazami szacunku,
-Franek
-ARCHITEKTONICZNE STUDIO HUBERT STENZEL
-franekstenzel@gmail.com"""
+    # Krótki podgląd – bez ściany tekstu na landing
+    preview_p0 = [
+        "Brak MPZP/WZ lub niepewna podstawa planistyczna",
+        "Brak mocy przyłączeniowej / niejasne warunki mediów",
+        "PPOŻ: sprinkler / strefy pożarowe / źródło wody – do potwierdzenia",
+        "Logistyka: liczba doków, drogi pożarowe, plac manewrowy – nieokreślone",
+    ]
+    preview_docs = [
+        "MPZP/WZ + wypis/wyrys",
+        "Mapa do celów projektowych 1:500",
+        "Geotechnika + wody gruntowe",
+        "Warunki przyłączeń (EE, woda, kanalizacja, gaz)",
+    ]
 
     free_card = """
             <div class=\"price\" style=\"border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)\" data-reveal>
               <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zł</div>
               <h3 style=\"margin:10px 0 0\">Beta (0 zł)</h3>
               <div class=\"big\">0 zł</div>
-              <div class=\"muted\">Dla pierwszych wdrożeń. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiąc</b>.</div>
+              <div class=\"muted\">Bez karty. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiąc</b>.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
-                <li>Brief + raport</li>
-                <li>Limit """ + str(FREE_FORMS_PER_MONTH_LIMIT) + """ / miesiąc</li>
+                <li>Brief + raport (braki, ryzyka, pytania)</li>
+                <li>Gotowy email do klienta</li>
               </ul>
               <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn gold\" href=\"/register\">Odbierz dostęp</a></div>
             </div>
@@ -1941,46 +1828,66 @@ franekstenzel@gmail.com"""
 
     body = f"""
     <div class=\"deck\">
-      <section class=\"slide\">
+      <section class=\"slide\" id=\"top\">
         <div class=\"wrap hero\">
           <div data-reveal>
             <div class=\"kicker\">
-              <span class=\"tag\"><span class=\"dot\"></span>Standaryzacja briefu inwestora</span>
+              <span class=\"tag\"><span class=\"dot\"></span>Brief inwestora, który domyka wycenę</span>
             </div>
-            <h1>Brief inwestorski → raport braków i ryzyk <span class=\"gold\">dla projektów przemysłowych</span></h1>
+            <h1>Inwestor wypełnia brief. Ty dostajesz <span class=\"gold\">raport braków i ryzyk</span>.</h1>
             <p class=\"lead\">
-              Inwestor wypełnia  formularz. Ty dostajesz raport: braki danych, ryzyka (P0/P1), pytania krytyczne i następne kroki.
-              Bez chaosu w mailach i bez wyceny na oślep.
+              ArchiBot standaryzuje zbieranie danych dla obiektów przemysłowych: hale, magazyny, logistyka.
+              Koniec „dopytywania w 20 mailach” i wyceny na oślep.
             </p>
+
             <div style=\"height:18px\"></div>
             <div class=\"cta\" style=\"justify-content:flex-start\">
-              <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
+              <a class=\"btn gold\" href=\"/register\">Start (Beta 0 zł)</a>
               <a class=\"btn\" href=\"/demo\">Zobacz brief</a>
+              <a class=\"btn\" href=\"/report-demo\">Zobacz raport</a>
             </div>
+
             <div style=\"height:18px\"></div>
             <div class=\"grid3\" style=\"grid-template-columns: repeat(3, 1fr);\">
-              <div class=\"stat\" data-reveal><div class=\"k\">CO DOSTAJESZ</div><div class=\"n\">Raport</div><div class=\"t\">Braki, ryzyka, pytania, kroki.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">DLA KOGO</div><div class=\"n\">Przemysł</div><div class=\"t\">Hale, magazyny, logistyka.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">DLACZEGO</div><div class=\"n\">Wycena</div><div class=\"t\">Mniej niedopowiedzeń i ryzyk.</div></div>
+              <div class=\"stat\" data-reveal><div class=\"k\">CO DOSTAJESZ</div><div class=\"n\">Raport</div><div class=\"t\">P0/P1, braki, pytania, kroki + email.</div></div>
+              <div class=\"stat\" data-reveal><div class=\"k\">DLA KOGO</div><div class=\"n\">Przemysł</div><div class=\"t\">Hale, magazyny, zakłady, cross-dock.</div></div>
+              <div class=\"stat\" data-reveal><div class=\"k\">KORZYŚĆ</div><div class=\"n\">Wycena</div><div class=\"t\">Szybciej domykasz zakres i ryzyka.</div></div>
+            </div>
+
+            <div style=\"height:18px\"></div>
+            <div class=\"grid3\" style=\"grid-template-columns: repeat(4, 1fr);\">
+              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">RODO / dane</h3><p class=\"muted\" style=\"margin:0\">Tylko dane potrzebne do briefu. Brak śledzących cookies.</p></div>
+              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Anulowanie</h3><p class=\"muted\" style=\"margin:0\">Subskrypcję anulujesz w panelu (1 klik).</p></div>
+              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Limity</h3><p class=\"muted\" style=\"margin:0\">Jasny limit formularzy / miesiąc per plan.</p></div>
+              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Wdrożenie</h3><p class=\"muted\" style=\"margin:0\">Link do briefu dla każdego architekta.</p></div>
             </div>
           </div>
 
           <div class=\"panel card floaty\" data-reveal>
-            <div class=\"muted\" style=\"font-weight:900\">Przykład: co wyłapie raport</div>
-            <div style=\"height:10px\"></div>
+            <div style=\"font-weight:900\">Podgląd: co wyłapie raport</div>
+            <div class=\"muted\" style=\"margin-top:6px\">Zamiast czytać 5 stron – widzisz konkret.</div>
+            <div style=\"height:12px\"></div>
+
             <div class=\"stat\">
-              <div style=\"font-weight:900\">Blokery (P0)</div>
-              <div class=\"muted\">Brak MPZP/WZ, brak mocy przyłączeniowej, brak PPOŻ, brak parametrów doków.</div>
+              <div style=\"font-weight:900\">Blockery (P0)</div>
+              <ul style=\"margin:10px 0 0 18px\">
+                {''.join('<li>'+esc(x)+'</li>' for x in preview_p0)}
+              </ul>
             </div>
+
             <div style=\"height:10px\"></div>
+
             <div class=\"stat\">
-              <div style=\"font-weight:900\">Ryzyka (P0/P1)</div>
-              <div class=\"muted\">Posadzka i obciazenia punktowe, retencja, kolizje z sieciami, logistyka placu.</div>
+              <div style=\"font-weight:900\">Brakujące dokumenty</div>
+              <ul style=\"margin:10px 0 0 18px\">
+                {''.join('<li>'+esc(x)+'</li>' for x in preview_docs)}
+              </ul>
             </div>
-            <div style=\"height:10px\"></div>
-            <div class=\"stat\">
-              <div style=\"font-weight:900\">Następne kroki</div>
-              <div class=\"muted\">Lista dokumentów i pytań do inwestora (gotowa do wysłania).</div>
+
+            <div style=\"height:14px\"></div>
+            <div class=\"actions\">
+              <a class=\"btn gold\" href=\"/report-demo\">Zobacz pełny przykład</a>
+              <a class=\"btn\" href=\"/demo\">Wypełnij demo</a>
             </div>
           </div>
         </div>
@@ -1989,12 +1896,12 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"funkcje\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Funkcje</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu dla projektow przemysłowych  i jeden raport, który prowadzi wycenę  i doprecyzowanie zakresu.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu + raport, który prowadzi doprecyzowanie zakresu i wyceny.</p>
           <div style=\"height:18px\"></div>
           <div class=\"grid3\">
-            <div class=\"tile\" data-reveal><h3>Komplet pytań</h3><p>Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
-            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p>Priorytety (P0/P1/P2), brakujące dokumenty, niejasności do doprecyzowania.</p></div>
-            <div class=\"tile\" data-reveal><h3>Email do klienta</h3><p>Gotowa wiadomość: prosba o uzupelnienia + lista pytan krytycznych.</p></div>
+            <div class=\"tile\" data-reveal><h3>Brief przemysłowy</h3><p class=\"muted\">Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
+            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p class=\"muted\">Priorytety (P0/P1/P2), brakujące dokumenty, niejasności do doprecyzowania.</p></div>
+            <div class=\"tile\" data-reveal><h3>Gotowy email</h3><p class=\"muted\">Wiadomość do klienta: prośba o uzupełnienia + lista pytań krytycznych.</p></div>
           </div>
         </div>
       </section>
@@ -2002,14 +1909,37 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"raport\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Raport demo</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Poniżej przykładowy fragment raportu. W produkcji trafia na mail architekta po zatwierdzeniu briefu.</p>
+          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Przykład w układzie, który da się wkleić do maila/oferty. Pełny przykład jest na osobnej stronie.</p>
           <div style=\"height:18px\"></div>
-          <div class=\"panel card\" data-reveal>
-            <div class=\"codebox\">{esc(sample)}</div>
-            <div class=\"actions\" style=\"margin-top:14px\">
-              <a class=\"btn gold\" href=\"/demo\">Wypełnij demo brief</a>
-              <a class=\"btn\" href=\"/register\">Załóż konto</a>
+
+          <div class=\"grid3\" style=\"grid-template-columns: repeat(2, 1fr);\">
+            <div class=\"panel card\" data-reveal>
+              <div class=\"tag\"><span class=\"dot\"></span>P0 – blockery</div>
+              <div style=\"height:10px\"></div>
+              <ul>
+                <li>Podstawa planistyczna (MPZP/WZ) – brak/niepewne</li>
+                <li>Media: moc + warunki przyłączeń – brak skanów</li>
+                <li>PPOŻ: sprinkler + źródło wody – do potwierdzenia</li>
+                <li>Logistyka: doki/rampa/plac – nieustalone</li>
+              </ul>
             </div>
+
+            <div class=\"panel card\" data-reveal>
+              <div class=\"tag\"><span class=\"dot\"></span>P1 – ryzyka</div>
+              <div style=\"height:10px\"></div>
+              <ul>
+                <li>Posadzka: obciążenia punktowe / strefowanie – do ustalenia</li>
+                <li>Retencja i deszczówka – ryzyko formalne/kosztowe</li>
+                <li>Kolizje z sieciami – ryzyko harmonogramu</li>
+                <li>Wymogi audytów (ISO/HACCP/ATEX) – wpływ na projekt</li>
+              </ul>
+            </div>
+          </div>
+
+          <div style=\"height:14px\"></div>
+          <div class=\"actions\" data-reveal>
+            <a class=\"btn gold\" href=\"/report-demo\">Zobacz pełny przykład raportu</a>
+            <a class=\"btn\" href=\"/demo\">Wypełnij demo brief</a>
           </div>
         </div>
       </section>
@@ -2018,10 +1948,10 @@ franekstenzel@gmail.com"""
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Jak to działa</h1>
           <div class=\"how\">
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 01</div><h3>Ustawienia firmy</h3><p>Dodajesz architektów (odbiorcy raportów) i opcjonalnie cennik wycen.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 02</div><h3>Brief inwestora</h3><p>Inwestor wypełnia formularz. Puste pola sa dopuszczalne.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 03</div><h3>Raport</h3><p>AI sklada raport: braki, ryzyka, pytania, dokumenty, kroki.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">ETAP 04</div><h3>Doprecyzowanie</h3><p>Masz gotowa liste do klienta - szybciej domykasz zakres i wycenę .</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">KROK 01</div><h3>Dodajesz architekta</h3><p class=\"muted\">W panelu dodajesz osoby, które mają dostać raport.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">KROK 02</div><h3>Wysyłasz link do inwestora</h3><p class=\"muted\">Kopiujesz link do briefu i wysyłasz go do klienta.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">KROK 03</div><h3>Powstaje raport</h3><p class=\"muted\">Braki, ryzyka, pytania krytyczne, dokumenty, następne kroki + email.</p></div>
+            <div class=\"step\" data-reveal><div class=\"k\">KROK 04</div><h3>Doprecyzowujesz zakres</h3><p class=\"muted\">Masz gotową listę do klienta → szybciej domykasz wycenę.</p></div>
           </div>
         </div>
       </section>
@@ -2029,34 +1959,41 @@ franekstenzel@gmail.com"""
       <section class=\"slide\" id=\"cennik\">
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>Plany</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Wersja produkcyjna ma plany platne przez Stripe. Jesli potrzebujesz: uruchom Beta 0 zł i testuj na realnych briefach.</p>
+          <p class=\"lead\" style=\"max-width:78ch\" data-reveal>
+            Subskrypcja odnawialna. Anulowanie i faktury: w panelu (Stripe portal).
+            Beta 0 zł jest bez karty.
+          </p>
           <div style=\"height:18px\"></div>
           <div class=\"pricing\" style=\"grid-template-columns: repeat(3, 1fr);\">
             {free_card}
             <div class=\"price\" data-reveal>
               <h3>Miesięcznie</h3>
               <div class=\"big\">249 zł</div>
-              <div class=\"muted\">Dla pracowni, ktore chca rozliczenie miesięczne.</div>
+              <div class=\"muted\">Dla pracowni z ciągłym napływem briefów.</div>
               <ul>
                 <li>Panel firmy + architekci</li>
                 <li>Brief + raport</li>
                 <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
                 <li>Cennik firmy do wycen</li>
+                <li>Anulujesz w panelu (1 klik)</li>
               </ul>
               <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
             <div class=\"price\" data-reveal>
               <h3>Rocznie</h3>
               <div class=\"big\">2 690 zł</div>
-              <div class=\"muted\">Dla pracowni pracujacych w trybie ciaglym.</div>
+              <div class=\"muted\">Dla pracowni pracujących w trybie ciągłym.</div>
               <ul>
                 <li>To samo co miesięcznie</li>
                 <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
                 <li>Wsparcie wdrożeniowe</li>
-                <li>Odnowienia cykliczne</li>
+                <li>Anulujesz w panelu (1 klik)</li>
               </ul>
               <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
             </div>
+          </div>
+          <div class=\"muted\" style=\"margin-top:14px\" data-reveal>
+            * Ceny przykładowe. Szczegóły: <a href=\"/legal/terms\" style=\"text-decoration:underline\">Regulamin</a>.
           </div>
         </div>
       </section>
@@ -2065,9 +2002,11 @@ franekstenzel@gmail.com"""
         <div class=\"wrap\">
           <h1 style=\"margin:0 0 14px\" data-reveal>FAQ</h1>
           <div class=\"panel card\" data-reveal>
-            <p class=\"muted\"><b>Czy wszystkie pola musza byc wypełnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupelniajace.</p>
-            <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespolu projektowego.</p>
-            <p class=\"muted\"><b>W jaki sposób przekazać brief inwestorowi?</b><br/>Wystarczy skopiować link pod nazwą architekta i wysłać go do inwestora</code>.</p>
+            <p class=\"muted\"><b>Czy wszystkie pola muszą być wypełnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupełniające.</p>
+            <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespołu projektowego.</p>
+            <p class=\"muted\"><b>Czy da się anulować subskrypcję?</b><br/>Tak. W panelu jest przycisk „Zarządzaj subskrypcją” (Stripe portal).</p>
+            <p class=\"muted\"><b>Gdzie są faktury?</b><br/>W tym samym miejscu – w portalu rozliczeń.</p>
+            <p class=\"muted\"><b>Jak przekazać brief inwestorowi?</b><br/>W panelu kopiujesz link pod architektem i wysyłasz go do inwestora.</p>
           </div>
           <div style=\"height:18px\"></div>
           <div class=\"cta\" style=\"justify-content:flex-start\" data-reveal>
@@ -2076,12 +2015,6 @@ franekstenzel@gmail.com"""
           </div>
         </div>
       </section>
-
-      <div class=\"foot\">
-        <div class=\"wrap\">
-          © {esc(APP_NAME)} • {esc(datetime.datetime.utcnow().year)}
-        </div>
-      </div>
     </div>
     """
 
@@ -2091,6 +2024,200 @@ franekstenzel@gmail.com"""
 # =========================
 # 11) Auth: rejestracja / logowanie – bez zmian
 # =========================
+
+
+# =========================
+# 10A) Podgląd raportu + strony legalne (must-have pod sprzedaż)
+# =========================
+
+@app.get("/report-demo", response_class=HTMLResponse)
+def report_demo():
+    body = f"""
+    <div class="wrap formwrap">
+      <h1 style="margin:0 0 10px">Raport demo (przykład)</h1>
+      <p class="lead" style="max-width:80ch">To jest przykład układu raportu. W realnym flow raport trafia na email architekta po zatwierdzeniu briefu.</p>
+
+      <div style="height:14px"></div>
+
+      <div class="grid3" style="grid-template-columns: repeat(2, 1fr); align-items:start;">
+        <div class="panel card">
+          <div class="tag"><span class="dot"></span>P0 – blockery (bez tego nie domykasz wyceny)</div>
+          <ul>
+            <li>MPZP/WZ: brak skanów / niepewna podstawa planistyczna</li>
+            <li>Media: moc + warunki przyłączeń – brak</li>
+            <li>PPOŻ: sprinkler / źródło wody / strefy – do potwierdzenia</li>
+            <li>Technologia: parametry suwnicy / maszyn – niepełne</li>
+          </ul>
+        </div>
+
+        <div class="panel card">
+          <div class="tag"><span class="dot"></span>P1 – ryzyka (koszt/harmonogram)</div>
+          <ul>
+            <li>Posadzka: obciążenia punktowe / strefy – ryzyko dopłat</li>
+            <li>Retencja i deszczówka – ryzyko formalne i CAPEX</li>
+            <li>Kolizje z sieciami / dojazdem – ryzyko czasu</li>
+            <li>Audyty/standardy (ISO/HACCP/ATEX) – wpływ na projekt</li>
+          </ul>
+        </div>
+
+        <div class="panel card">
+          <div class="tag"><span class="dot"></span>Brakujące dokumenty</div>
+          <ul>
+            <li>MPZP/WZ + wypis/wyrys</li>
+            <li>Mapa do celów projektowych 1:500</li>
+            <li>Geotechnika + wody gruntowe</li>
+            <li>Warunki przyłączeń (EE, woda, kanalizacja, gaz)</li>
+            <li>Wstępny layout technologii (URS)</li>
+          </ul>
+        </div>
+
+        <div class="panel card">
+          <div class="tag"><span class="dot"></span>Gotowy email do inwestora</div>
+          <div class="codebox">Temat: Prośba o uzupełnienie briefu – dokumenty i pytania (P0)
+
+Dzień dobry,
+dziękujemy za przesłany brief. Żeby domknąć zakres i wycenę, potrzebujemy uzupełnień:
+1) MPZP/WZ + wypis/wyrys, mapa 1:500, geotechnika, warunki przyłączeń.
+2) PPOŻ: czy wymagany sprinkler i jakie źródło wody?
+3) Technologia: parametry suwnicy / maszyn (udźwig, rozpiętość, media).
+4) Logistyka: liczba doków, plac manewrowy, okna dostaw.
+
+Pozdrawiam,
+Zespół projektowy</div>
+        </div>
+      </div>
+
+      <div style="height:16px"></div>
+      <div class="actions">
+        <a class="btn gold" href="/demo">Wypełnij demo brief</a>
+        <a class="btn" href="/register">Załóż konto</a>
+      </div>
+    </div>
+    """
+    return HTMLResponse(layout("Raport demo", body=body, nav=nav_links()))
+
+
+def _legal_page(title: str, heading: str, inner_html: str) -> HTMLResponse:
+    body = f"""
+    <div class="wrap formwrap">
+      <h1 style="margin:0 0 10px">{esc(heading)}</h1>
+      <div class="panel card">
+        <div class="muted" style="max-width:92ch">
+          {inner_html}
+        </div>
+      </div>
+      <div class="actions" style="margin-top:14px">
+        <a class="btn" href="/">Strona główna</a>
+        <a class="btn" href="/contact">Kontakt</a>
+      </div>
+    </div>
+    """
+    return HTMLResponse(layout(title, body=body, nav=nav_links()))
+
+
+@app.get("/legal/terms", response_class=HTMLResponse)
+def legal_terms():
+    inner = f"""
+      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
+      <p><b>To jest szablon.</b> Zanim zaczniesz sprzedawać, wklej tu własny regulamin przygotowany pod Twoją firmę i model sprzedaży (B2B/B2C, zwroty, faktury, itp.).</p>
+
+      <h3 style="margin:18px 0 8px">1. Usługa</h3>
+      <ul>
+        <li>ArchiBot umożliwia zbieranie danych od inwestora przez formularz oraz generuje raport dla architekta.</li>
+        <li>Raport ma charakter pomocniczy (brief + wstępna analiza ryzyk), nie zastępuje projektu ani uzgodnień.</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">2. Konto</h3>
+      <ul>
+        <li>Dostęp do panelu wymaga konta (email + hasło).</li>
+        <li>Użytkownik odpowiada za linki do briefu udostępniane inwestorom.</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">3. Płatności i subskrypcja</h3>
+      <ul>
+        <li>Płatności obsługuje Stripe (subskrypcja odnawialna automatycznie do czasu anulowania).</li>
+        <li><b>Anulowanie:</b> w panelu firmy (przycisk „Zarządzaj subskrypcją”). Po anulowaniu plan wygasa zgodnie z okresem rozliczeniowym.</li>
+        <li>Faktury/rachunki: dostępne w portalu rozliczeń Stripe.</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">4. Ograniczenie odpowiedzialności</h3>
+      <ul>
+        <li>Usługa nie gwarantuje kompletności danych od inwestora.</li>
+        <li>Decyzje projektowe i formalne należą do użytkownika (architekta/pracowni).</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">5. Reklamacje</h3>
+      <ul>
+        <li>Kontakt: patrz strona „Kontakt”.</li>
+      </ul>
+    """
+    return _legal_page("Regulamin", "Regulamin", inner)
+
+
+@app.get("/legal/privacy", response_class=HTMLResponse)
+def legal_privacy():
+    inner = f"""
+      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
+      <p><b>To jest szablon.</b> Uzupełnij o dane administratora, podstawy prawne, odbiorców i okresy retencji.</p>
+
+      <h3 style="margin:18px 0 8px">Jakie dane zbieramy</h3>
+      <ul>
+        <li>Dane konta: email, nazwa firmy, hasło (hash).</li>
+        <li>Dane z briefu: informacje podane przez inwestora w formularzu.</li>
+        <li>Dane rozliczeniowe: jeśli podasz w panelu (np. NIP/adres).</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">W jakim celu</h3>
+      <ul>
+        <li>Świadczenie usługi (panel, formularze, raporty).</li>
+        <li>Kontakt i wsparcie.</li>
+        <li>Rozliczenia (jeśli dotyczy).</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">Podmioty przetwarzające</h3>
+      <ul>
+        <li>Stripe – płatności i portal rozliczeń (jeśli plan płatny).</li>
+        <li>Dostawcy infrastruktury hostingowej.</li>
+        <li>OpenAI – generowanie raportu (jeśli funkcja AI jest włączona).</li>
+      </ul>
+
+      <h3 style="margin:18px 0 8px">Twoje prawa</h3>
+      <ul>
+        <li>Dostęp, sprostowanie, usunięcie, ograniczenie, sprzeciw.</li>
+      </ul>
+    """
+    return _legal_page("Prywatność", "Polityka prywatności", inner)
+
+
+@app.get("/legal/cookies", response_class=HTMLResponse)
+def legal_cookies():
+    inner = f"""
+      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
+      <h3 style="margin:18px 0 8px">Cookies</h3>
+      <ul>
+        <li>ArchiBot używa wyłącznie <b>niezbędnego</b> cookie sesyjnego do logowania i działania panelu.</li>
+        <li>Nie używamy śledzących cookies ani reklam.</li>
+      </ul>
+      <h3 style="margin:18px 0 8px">Jak zarządzać</h3>
+      <ul>
+        <li>Możesz usunąć cookies w ustawieniach przeglądarki.</li>
+      </ul>
+    """
+    return _legal_page("Cookies", "Polityka cookies", inner)
+
+
+@app.get("/contact", response_class=HTMLResponse)
+def contact():
+    inner = f"""
+      <p><b>Wsparcie:</b> {esc(BOT_EMAIL)}</p>
+      <p class="muted">Dla sprzedaży (must-have): dodaj tu nazwę firmy, adres, NIP oraz preferowany kanał kontaktu.</p>
+      <ul>
+        <li>W sprawach subskrypcji i faktur: panel firmy → „Zarządzaj subskrypcją”.</li>
+        <li>W sprawach technicznych: opisz problem i podaj email konta.</li>
+      </ul>
+    """
+    return _legal_page("Kontakt", "Kontakt", inner)
+
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page():
@@ -2218,6 +2345,12 @@ def dashboard(request: Request):
     st = (company.get("stripe") or {}).get("status") or "inactive"
     stripe_msg = "Stripe niepodlaczony" if not stripe_ready() else f"Stripe: {st}"
 
+    customer_id = (company.get("stripe") or {}).get("customer_id") or ""
+    portal_btn = ""
+    if stripe_ready() and customer_id:
+        portal_btn = '<a class="btn" href="/billing/portal">Zarządzaj subskrypcją</a>'
+
+
     architects = company.get("architects", [])
     arch_rows = []
     for a in architects:
@@ -2257,6 +2390,7 @@ def dashboard(request: Request):
           <div class=\"muted\">Panel firmy • {badge('Dostęp aktywny' if access_ok else 'Dostęp zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
         </div>
         <div style=\"display:flex;gap:10px;align-items:center;flex-wrap:wrap\">
+          <a class=\"btn\" href=\"/dashboard/reports\">Raporty</a>
           <a class=\"btn\" href=\"/demo\">Podgląd briefu</a>
           <a class=\"btn\" href=\"/logout\">Wyloguj</a>
         </div>
@@ -2320,12 +2454,13 @@ def dashboard(request: Request):
       <div style=\"height:18px\"></div>
 
       <div class=\"panel card\">
-        <h3 style=\"margin:0 0 10px\">Plan i platnosci</h3>
+        <h3 style=\"margin:0 0 10px\">Plan i płatności</h3>
         <div class=\"actions\">
           {free_action}
+          {portal_btn}
           <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesięczną (249 zł)</a>
           <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczną (2 690 zł)</a>
-          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiąc.</span>
+          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiąc • Anulowanie: 1 klik w panelu.</span>
         </div>
       </div>
     </div>
@@ -2434,6 +2569,151 @@ def delete_architect(request: Request, id: str = ""):
     db["companies"][cid]["architects"] = [a for a in db["companies"][cid].get("architects", []) if a.get("id") != id]
     _save_db(db)
     return RedirectResponse(url="/dashboard", status_code=302)
+
+
+
+# =========================
+# 12A) Raporty w panelu (historia)
+# =========================
+
+def _fmt_dt(ts: Any) -> str:
+    try:
+        return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return ""
+
+@app.get("/dashboard/reports", response_class=HTMLResponse)
+def dashboard_reports(request: Request):
+    gate = require_company(request)
+    if gate:
+        return gate
+    company = get_company(request)
+    assert company is not None
+
+    db = _load_db()
+    cid = company["id"]
+    c = db["companies"].get(cid) or {}
+    reports = c.get("reports") or []
+    if not isinstance(reports, list):
+        reports = []
+
+    rows = []
+    for r in reports:
+        rid = str(r.get("id") or "")
+        rows.append(f"""
+          <tr>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(_fmt_dt(r.get("created_at")))}</td>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("project") or "")}</td>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("investor") or "")}</td>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("architect_name") or "")}</td>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{badge("wysłano" if r.get("sent_email") else "nie", bool(r.get("sent_email")))}</td>
+            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08); white-space:nowrap">
+              <a class="btn" href="/dashboard/report?id={esc(rid)}">Podgląd</a>
+              <a class="btn" href="/dashboard/report/download?id={esc(rid)}">Pobierz .txt</a>
+            </td>
+          </tr>
+        """)
+
+    if rows:
+        table_html = f"""
+        <div style="overflow:auto">
+          <table style="width:100%; border-collapse: collapse; font-size: 14px;">
+            <thead>
+              <tr style="text-align:left; color: rgba(238,242,255,0.75);">
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Data</th>
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Projekt</th>
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Inwestor</th>
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Architekt</th>
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Email</th>
+                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Akcje</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(rows)}
+            </tbody>
+          </table>
+        </div>
+        """
+    else:
+        table_html = '<div class="muted">Brak raportów. Najpierw wyślij link do briefu do inwestora.</div>'
+
+    body = f"""
+    <div class="wrap formwrap">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+        <h1 style="margin:0">Raporty</h1>
+        <div class="actions" style="margin-top:0">
+          <a class="btn" href="/dashboard">Wróć do panelu</a>
+        </div>
+      </div>
+      <div style="height:12px"></div>
+
+      <div class="panel card">
+        {table_html}
+      </div>
+    </div>
+    """
+    return HTMLResponse(layout("Raporty", body=body, nav=nav_links()))
+
+@app.get("/dashboard/report", response_class=HTMLResponse)
+def dashboard_report_view(request: Request, id: str = ""):
+    gate = require_company(request)
+    if gate:
+        return gate
+    company = get_company(request)
+    assert company is not None
+
+    db = _load_db()
+    cid = company["id"]
+    c = db["companies"].get(cid) or {}
+    reports = c.get("reports") or []
+    if not isinstance(reports, list):
+        reports = []
+    rep = next((r for r in reports if str(r.get("id") or "") == id), None)
+    if not rep:
+        return RedirectResponse(url="/dashboard/reports", status_code=302)
+
+    report_text = rep.get("report") or ""
+
+    body = f"""
+    <div class="wrap formwrap">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+        <h1 style="margin:0 0 6px">Raport</h1>
+        <div class="actions" style="margin-top:0">
+          <a class="btn" href="/dashboard/reports">Lista raportów</a>
+          <a class="btn" href="/dashboard/report/download?id={esc(id)}">Pobierz .txt</a>
+        </div>
+      </div>
+      <div class="muted">Projekt: <b>{esc(rep.get("project") or "")}</b> • Inwestor: <b>{esc(rep.get("investor") or "")}</b> • {esc(_fmt_dt(rep.get("created_at")))}</div>
+
+      <div style="height:12px"></div>
+      <div class="panel card" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">
+{esc(report_text)}
+      </div>
+    </div>
+    """
+    return HTMLResponse(layout("Raport", body=body, nav=nav_links()))
+
+@app.get("/dashboard/report/download")
+def dashboard_report_download(request: Request, id: str = ""):
+    gate = require_company(request)
+    if gate:
+        return gate
+    company = get_company(request)
+    assert company is not None
+
+    db = _load_db()
+    cid = company["id"]
+    c = db["companies"].get(cid) or {}
+    reports = c.get("reports") or []
+    if not isinstance(reports, list):
+        reports = []
+    rep = next((r for r in reports if str(r.get("id") or "") == id), None)
+    if not rep:
+        return RedirectResponse(url="/dashboard/reports", status_code=302)
+
+    text = rep.get("report") or ""
+    fname = f"archibot-report-{id}.txt"
+    return PlainTextResponse(text, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 # =========================
@@ -2814,6 +3094,25 @@ async def submit_form(token: str, request: Request):
     else:
         print(f"[EMAIL] FAIL delivery_id={delivery_id} reason=architect has no email in DB")
 
+    # Zapis raportu w panelu (ostatnie N)
+    try:
+        record = {
+            "id": _new_id("rep"),
+            "created_at": _now_ts(),
+            "architect_name": architect.get("name", ""),
+            "architect_email": architect.get("email", ""),
+            "project": form_clean.get("investment_name") or "",
+            "investor": form_clean.get("investor_company") or "",
+            "sent_email": bool(sent),
+            "delivery_id": delivery_id,
+            "report": report,
+        }
+        _add_report(db, company_id, record)
+        _save_db(db)
+    except Exception as e:
+        print(f"[REPORT] store error: {type(e).__name__}: {e}")
+
+
     # Komunikat dla inwestora – profesjonalny, neutralny, bez odsyłania do logów
     body = """
     <div class="wrap formwrap">
@@ -2861,6 +3160,37 @@ def billing_checkout(request: Request, plan: str = "monthly"):
         return RedirectResponse(url=session.url, status_code=303)  # type: ignore
     except Exception as e:
         print(f"[STRIPE] checkout error: {type(e).__name__}: {e}")
+        return RedirectResponse(url="/dashboard", status_code=302)
+
+
+
+@app.get("/billing/portal")
+def billing_portal(request: Request):
+    """Stripe Customer Portal: anulowanie, faktury, zmiana karty. Must-have pod sprzedaż."""
+    gate = require_company(request)
+    if gate:
+        return gate
+    company = get_company(request)
+    assert company is not None
+
+    if not stripe_ready():
+        return RedirectResponse(url="/dashboard", status_code=302)
+
+    stripe_init()
+
+    customer_id = (company.get("stripe") or {}).get("customer_id") or ""
+    if not customer_id:
+        # brak customer_id: użytkownik nie ma jeszcze płatnej subskrypcji
+        return RedirectResponse(url="/dashboard", status_code=302)
+
+    try:
+        session = stripe.billing_portal.Session.create(  # type: ignore
+            customer=customer_id,
+            return_url=f"{BASE_URL}/dashboard",
+        )
+        return RedirectResponse(url=session.url, status_code=303)  # type: ignore
+    except Exception as e:
+        print(f"[STRIPE] portal error: {type(e).__name__}: {e}")
         return RedirectResponse(url="/dashboard", status_code=302)
 
 @app.post("/stripe/webhook")
