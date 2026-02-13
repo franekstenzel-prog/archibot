@@ -8,6 +8,7 @@ import html
 import base64
 import hashlib
 import secrets
+import re
 import datetime
 import ssl
 import socket
@@ -660,6 +661,8 @@ FORMS_PER_MONTH_LIMIT = 100
 ENABLE_FREE_PLAN = (os.getenv("ENABLE_FREE_PLAN", "true").lower() in ("1", "true", "yes", "y", "on"))
 FREE_FORMS_PER_MONTH_LIMIT = int(os.getenv("FREE_FORMS_PER_MONTH_LIMIT", "3"))
 
+MAX_REPORTS_PER_COMPANY = int(os.getenv("MAX_REPORTS_PER_COMPANY", "50"))
+
 PLAN_LABELS = {
     "free": "Beta 0 zł",
     "monthly": "Miesięczny",
@@ -708,15 +711,58 @@ def _increment_forms_sent(db: Dict[str, Any], company_id: str) -> None:
     _ensure_usage_period(c)
     c["usage"]["forms_sent"] = int(c["usage"].get("forms_sent") or 0) + 1
 
+def _ensure_reports(company: Dict[str, Any]) -> None:
+    if "reports" not in company or not isinstance(company.get("reports"), list):
+        company["reports"] = []
 
-def _add_report(db: Dict[str, Any], company_id: str, record: Dict[str, Any], max_keep: int = 30) -> None:
-    """Przechowuj ostatnie raporty w DB (pod panel + dowody wysyłki)."""
+def _pick_title_from_form(form_clean: Dict[str, Any]) -> str:
+    # Próbujemy znaleźć sensowny tytuł bez zależności od konkretnego schematu pól
+    keys = [
+        "project_name", "investment_name", "project", "investment_title",
+        "client_project", "name_of_investment",
+        "investor_company", "company_name", "client_company",
+        "location", "site_location",
+    ]
+    for k in keys:
+        v = str(form_clean.get(k) or "").strip()
+        if v:
+            return v[:80]
+    return "Brief inwestorski"
+
+def _store_report(
+    db: Dict[str, Any],
+    company_id: str,
+    *,
+    report_text: str,
+    form_clean: Dict[str, Any],
+    architect: Dict[str, Any],
+    delivery_id: str,
+    email_sent: bool,
+) -> str:
+    if company_id not in db.get("companies", {}):
+        return ""
     c = db["companies"][company_id]
-    reports = c.get("reports") or []
-    if not isinstance(reports, list):
-        reports = []
-    reports.insert(0, record)
-    c["reports"] = reports[:max_keep]
+    _ensure_reports(c)
+
+    rid = _new_id("rep")
+    title = _pick_title_from_form(form_clean)
+    item = {
+        "id": rid,
+        "created_at": _now_ts(),
+        "title": title,
+        "architect_id": architect.get("id", ""),
+        "architect_name": architect.get("name", ""),
+        "architect_email": architect.get("email", ""),
+        "delivery_id": delivery_id,
+        "email_sent": bool(email_sent),
+        "report": report_text,
+    }
+
+    # najnowsze na górze + twardy limit, żeby JSON nie puchł bez końca
+    c["reports"] = [item] + list(c.get("reports") or [])
+    c["reports"] = c["reports"][:max(1, int(MAX_REPORTS_PER_COMPANY or 50))]
+    return rid
+
 
 def _new_submit_token() -> str:
     return secrets.token_urlsafe(16)
@@ -781,7 +827,37 @@ def badge(label: str, ok: bool) -> str:
     cls = "badge ok" if ok else "badge bad"
     return f'<span class="{cls}">{esc(label)}</span>'
 
-def layout(title: str, body: str, *, nav: str = "") -> str:
+def layout(title: str, body: str, *, nav: str = "", request: Optional[Request] = None, page: str = "") -> str:
+    """Globalny layout UI (jeden plik). Kolory pozostają zgodne z ikoną / tłem.
+    `page` pozwala dodać lekkie różnice (np. home ma splash).
+    """
+    logged_in = False
+    company_name = ""
+    if request is not None:
+        try:
+            c = get_company(request)
+            if c:
+                logged_in = True
+                company_name = str(c.get("name") or "")
+        except Exception:
+            pass
+
+    if logged_in:
+        cta = '''
+          <a class="btn ghost" href="/demo">Podgląd briefu</a>
+          <a class="btn" href="/dashboard">Panel</a>
+          <a class="btn gold" href="/logout">Wyloguj</a>
+        '''
+    else:
+        cta = '''
+          <a class="btn ghost" href="/demo">Podgląd briefu</a>
+          <a class="btn" href="/login">Zaloguj</a>
+          <a class="btn gold" href="/register">Załóż konto</a>
+        '''
+
+    menu = nav or ""
+    page_class = f"page-{page}" if page else ""
+
     return f"""<!doctype html>
 <html lang="pl">
 <head>
@@ -796,7 +872,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     :root {{
       --bg: #070B16;
       --panel: rgba(255,255,255,0.06);
-      --panel2: rgba(255,255,255,0.08);
+      --panel2: rgba(255,255,255,0.09);
       --stroke: rgba(255,255,255,0.12);
       --text: #EEF2FF;
       --muted: rgba(238,242,255,0.70);
@@ -805,6 +881,7 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       --danger: #ff5b5b;
       --ok: #49d17d;
       --shadow: 0 12px 40px rgba(0,0,0,0.40);
+      --r: 22px;
     }}
     * {{ box-sizing: border-box; }}
     html, body {{ height: 100%; }}
@@ -812,17 +889,18 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       margin: 0;
       font-family: "Syne", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       background:
-        radial-gradient(900px 400px at 20% 10%, rgba(214,179,106,0.12), transparent 50%),
-        radial-gradient(900px 400px at 80% 20%, rgba(255,255,255,0.08), transparent 45%),
-        radial-gradient(900px 600px at 50% 90%, rgba(214,179,106,0.08), transparent 55%),
+        radial-gradient(900px 480px at 18% 8%, rgba(214,179,106,0.12), transparent 55%),
+        radial-gradient(920px 460px at 82% 20%, rgba(255,255,255,0.07), transparent 55%),
+        radial-gradient(900px 640px at 50% 92%, rgba(214,179,106,0.09), transparent 58%),
         var(--bg);
       color: var(--text);
       overflow-x: hidden;
     }}
+    body.no-scroll {{ overflow: hidden; }}
     a {{ color: inherit; text-decoration: none; }}
     .wrap {{ width: min(1120px, calc(100% - 40px)); margin: 0 auto; }}
     .topbar {{
-      position: sticky; top: 0; z-index: 50;
+      position: sticky; top: 0; z-index: 60;
       backdrop-filter: blur(10px);
       background: rgba(7,11,22,0.55);
       border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -830,19 +908,21 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
     .nav {{
       display:flex; align-items:center; justify-content:space-between;
       padding: 14px 0;
+      gap: 12px;
     }}
     .brand {{
       display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing: 0.2px;
+      min-width: 160px;
     }}
     .logo {{
       width:34px; height:34px; border-radius: 12px;
       background: url('/logo_arch.png') center/contain no-repeat;
       box-shadow: 0 10px 30px rgba(214,179,106,0.20);
     }}
-    .menu {{ display:flex; align-items:center; gap:16px; color: var(--muted); font-weight:600; }}
+    .menu {{ display:flex; align-items:center; gap:6px; color: var(--muted); font-weight:700; flex-wrap: wrap; justify-content:center; }}
     .menu a {{ padding: 8px 10px; border-radius: 12px; }}
     .menu a:hover {{ background: rgba(255,255,255,0.06); color: var(--text); }}
-    .cta {{ display:flex; align-items:center; gap:10px; }}
+    .cta {{ display:flex; align-items:center; gap:10px; flex-wrap: wrap; justify-content:flex-end; }}
     .btn {{
       display:inline-flex; align-items:center; justify-content:center;
       gap:10px;
@@ -851,328 +931,397 @@ def layout(title: str, body: str, *, nav: str = "") -> str:
       border: 1px solid rgba(255,255,255,0.12);
       background: rgba(255,255,255,0.06);
       color: var(--text);
-      font-weight: 700;
-      box-shadow: none;
-      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+      font-weight: 800;
+      transition: transform .15s ease, background .15s ease, border-color .15s ease, opacity .15s ease;
+      user-select:none;
+      cursor:pointer;
     }}
     .btn:hover {{ transform: translateY(-1px); background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }}
+    .btn:active {{ transform: translateY(0); opacity: .92; }}
     .btn.gold {{
       background: linear-gradient(180deg, rgba(214,179,106,1), rgba(184,148,67,1));
       color: #0b0f1a;
       border-color: rgba(214,179,106,0.85);
       box-shadow: 0 14px 40px rgba(214,179,106,0.18);
     }}
-    .btn.gold:hover {{ transform: translateY(-1px); }}
     .btn.ghost {{ background: transparent; }}
-    .badge {{ padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; border:1px solid rgba(255,255,255,0.12); }}
+    .badge {{ padding: 6px 10px; border-radius: 999px; font-weight: 900; font-size: 12px; border:1px solid rgba(255,255,255,0.12); }}
     .badge.ok {{ color: var(--ok); border-color: rgba(73,209,125,0.35); background: rgba(73,209,125,0.08); }}
     .badge.bad {{ color: var(--danger); border-color: rgba(255,91,91,0.35); background: rgba(255,91,91,0.08); }}
-
-    .deck {{ scroll-snap-type: y mandatory; }}
-    section.slide {{
-      
-      min-height: calc(100vh - 64px);
-      padding: 56px 0;
-      display:flex; align-items:center;
-    }}
-    .hero {{
-      display:grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 34px;
-      align-items: center;
-    }}
-    .kicker {{
-      display:inline-flex; align-items:center; gap:10px;
-      padding: 8px 12px; border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.06);
-      color: var(--muted);
-      font-weight:700;
-      width: fit-content;
-    }}
-    h1 {{
-      margin: 14px 0 10px;
-      font-size: clamp(40px, 4.2vw, 64px);
-      line-height: 1.03;
-      letter-spacing: -0.8px;
-    }}
-    .gold {{ color: var(--gold); }}
-    .lead {{
-      margin: 0;
-      color: var(--muted);
-      font-size: 18px;
-      line-height: 1.6;
-      max-width: 68ch;
-    }}
+    .muted {{ color: var(--muted); font-weight: 700; }}
+    .lead {{ color: rgba(238,242,255,0.82); font-weight: 750; line-height: 1.55; }}
     .panel {{
-      background: var(--panel);
-      border: 1px solid rgba(255,255,255,0.10);
-      border-radius: 22px;
-      box-shadow: var(--shadow);
-    }}
-    .card {{ padding: 20px; }}
-
-    .grid3 {{
-      display:grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-    }}
-    .tile {{
-      padding: 18px;
-      border-radius: 20px;
+      border-radius: var(--r);
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.08);
-      transition: transform .15s ease, background .15s ease;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.28);
     }}
-    .tile:hover {{ transform: translateY(-2px); background: rgba(255,255,255,0.07); }}
-
-    .formwrap {{ padding: 32px 0 60px; }}
+    .card {{ padding: 18px; }}
+    .divider {{ height:1px; background: rgba(255,255,255,0.08); margin: 16px 0; }}
+    .grid {{ display:grid; gap: 14px; }}
+    .grid2 {{ display:grid; gap: 14px; grid-template-columns: 1fr 1fr; }}
+    .grid3 {{ display:grid; gap: 14px; grid-template-columns: repeat(3, 1fr); }}
+    .stat {{
+      padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }}
+    .k {{ color: rgba(238,242,255,0.55); font-weight: 900; letter-spacing: .12em; font-size: 12px; }}
+    .n {{ font-weight: 900; font-size: 20px; margin-top: 6px; }}
+    .t {{ color: var(--muted); font-weight: 750; margin-top: 6px; line-height: 1.5; }}
     .notice {{
-      padding: 14px 16px;
-      border-radius: 16px;
-      background: rgba(214,179,106,0.10);
-      border: 1px solid rgba(214,179,106,0.25);
-      color: rgba(238,242,255,0.85);
-      line-height: 1.5;
+      padding: 12px 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
     }}
-    details {{
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.10);
-      border-radius: 18px;
-      padding: 14px 14px;
-      margin: 12px 0;
-    }}
-    summary {{
-      cursor: pointer;
-      font-weight: 800;
-      color: var(--text);
-      outline: none;
-      list-style: none;
-    }}
-    summary::-webkit-details-marker {{ display: none; }}
-    .fields {{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 14px;
-    }}
-    .field {{ display:flex; flex-direction: column; gap: 7px; }}
-    .field label {{ color: rgba(238,242,255,0.80); font-weight: 700; font-size: 13px; }}
+    .formwrap {{ padding: 34px 0 60px; }}
+    .fields {{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
+    .field {{ display:flex; flex-direction:column; gap: 8px; }}
+    .field.full {{ grid-column: 1 / -1; }}
+    label {{ font-weight: 900; color: rgba(238,242,255,0.82); }}
     input, select, textarea {{
-      width: 100%;
+      width:100%;
       padding: 12px 12px;
       border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(7,11,22,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(0,0,0,0.18);
       color: var(--text);
-      font-weight: 650;
       outline: none;
+      font-weight: 750;
     }}
-    input::placeholder, textarea::placeholder {{ color: rgba(238,242,255,0.40); }}
-    textarea {{ min-height: 100px; resize: vertical; }}
-    select option {{ color: #0b0f1a; background: #ffffff; }}
-    .field.full {{ grid-column: 1 / -1; }}
-    .checkrow {{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 14px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }}
-    .checkrow input[type="checkbox"] {{ width: 18px; height: 18px; }}
-    .actions {{ display:flex; gap: 12px; align-items:center; margin-top: 18px; flex-wrap: wrap; }}
-    .muted {{ color: var(--muted); font-weight: 650; line-height: 1.6; }}
+    textarea {{ min-height: 140px; resize: vertical; }}
+    input:focus, textarea:focus, select:focus {{ border-color: rgba(214,179,106,0.55); box-shadow: 0 0 0 4px rgba(214,179,106,0.10); }}
+    .actions {{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; justify-content:flex-start; }}
+    .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .codebox {{ white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; color: rgba(238,242,255,0.85); }}
+    .tag {{ display:inline-flex; align-items:center; gap:8px; padding: 7px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); color: rgba(238,242,255,0.78); font-weight: 900; font-size: 12px; }}
+    .tag .dot {{ width: 8px; height: 8px; border-radius: 999px; background: var(--gold); box-shadow: 0 0 0 4px rgba(214,179,106,0.18); }}
+    .reveal {{ opacity: 0; transform: translateY(14px); filter: blur(6px); transition: opacity .7s ease, transform .7s ease, filter .7s ease; }}
+    .reveal.in {{ opacity: 1; transform: translateY(0); filter: blur(0); }}
 
-    
-
-    .big {{ font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 8px; }}
-
-    .foot {{
-      padding: 34px 0 56px;
-      color: rgba(238,242,255,0.62);
-      border-top: 1px solid rgba(255,255,255,0.06);
-      margin-top: 40px;
-    }}
-    .footgrid {{
-      display: grid;
-      grid-template-columns: 1.2fr 1fr;
+    /* DASH */
+    .dash {{
+      display:grid;
+      grid-template-columns: 260px 1fr;
       gap: 16px;
       align-items: start;
+      padding: 26px 0 60px;
     }}
-    .footlinks {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      align-items: center;
-    }}
-    .footlinks a {{
-      padding: 8px 10px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      color: rgba(238,242,255,0.70);
-      font-weight: 800;
-      font-size: 12px;
-    }}
-    .footlinks a:hover {{
-      background: rgba(255,255,255,0.06);
-      color: rgba(238,242,255,0.86);
-    }}
-    .cookie {{
-      position: fixed;
-      left: 14px;
-      right: 14px;
-      bottom: 14px;
-      z-index: 80;
-      box-shadow: var(--shadow);
-    }}
-    .cookie-inner {{
-      width: min(1120px, calc(100% - 18px));
-      margin: 0 auto;
+    .side {{
+      position: sticky; top: 82px;
       padding: 14px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
     }}
-    .cookie-inner .muted a {{
-      text-decoration: underline;
+    .side .title {{
+      font-weight: 950; font-size: 14px; letter-spacing: .10em; color: rgba(238,242,255,0.55);
+      margin-bottom: 10px;
+    }}
+    .navitem {{
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 10px 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: rgba(238,242,255,0.78);
+      font-weight: 850;
+      margin: 8px 0;
+    }}
+    .navitem:hover {{ background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.14); }}
+    .navitem.active {{
+      background: rgba(214,179,106,0.10);
+      border-color: rgba(214,179,106,0.35);
+      color: rgba(238,242,255,0.95);
+    }}
+    .main {{
+      padding: 14px;
+    }}
+    .headrow {{
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 14px; flex-wrap: wrap;
+      margin-bottom: 14px;
+    }}
+    .h1 {{ font-size: 28px; font-weight: 950; margin: 0; }}
+    .sub {{ margin: 6px 0 0; }}
+    .table {{
+      width:100%;
+      border-collapse: collapse;
+      overflow:hidden;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+    }}
+    .table th, .table td {{
+      padding: 12px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      vertical-align: top;
+      font-weight: 750;
+    }}
+    .table th {{ color: rgba(238,242,255,0.65); font-weight: 900; font-size: 12px; letter-spacing: .10em; }}
+    .table tr:last-child td {{ border-bottom: none; }}
+    .pill {{
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+      font-weight: 900; font-size: 12px;
+    }}
+    .pill.ok {{ border-color: rgba(73,209,125,0.35); background: rgba(73,209,125,0.08); color: var(--ok); }}
+    .pill.bad {{ border-color: rgba(255,91,91,0.35); background: rgba(255,91,91,0.08); color: var(--danger); }}
+
+    /* HOME SPLASH */
+    .splash {{
+      position: fixed; inset: 0; z-index: 9999;
+      background:
+        radial-gradient(900px 420px at 50% 40%, rgba(214,179,106,0.13), transparent 55%),
+        radial-gradient(900px 520px at 50% 70%, rgba(255,255,255,0.06), transparent 62%),
+        var(--bg);
+      display:flex; align-items:center; justify-content:center;
+    }}
+    .splash .box {{
+      width: min(920px, calc(100% - 40px));
+      text-align:center;
+    }}
+    .splash svg {{ width: min(860px, 100%); height: 200px; }}
+    .splash .hint {{
+      margin-top: 10px; color: rgba(238,242,255,0.55); font-weight: 850; letter-spacing: .16em; font-size: 12px;
+    }}
+    .splash.hide {{ animation: splashOut .9s ease forwards; }}
+    @keyframes splashOut {{
+      to {{ opacity: 0; transform: scale(1.02); filter: blur(8px); pointer-events:none; }}
     }}
 
+    /* HOME STEPS */
+    .heroHome {{
+      padding: 46px 0 12px;
+    }}
+    .heroGrid {{
+      display:grid; gap: 18px;
+      grid-template-columns: 1.2fr .8fr;
+      align-items: start;
+    }}
+    .titleBig {{
+      font-size: 54px;
+      line-height: 1.02;
+      margin: 0 0 12px;
+      font-weight: 950;
+      letter-spacing: -0.02em;
+    }}
+    .titleBig .gold {{ color: var(--gold); }}
+    .heroCard {{
+      padding: 16px; border-radius: var(--r);
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+    }}
+    .howShow {{
+      padding: 26px 0 10px;
+    }}
+    .howShell {{
+      position: relative;
+      height: 340vh; /* scroll space */
+    }}
+    .howSticky {{
+      position: sticky; top: 86px;
+      border-radius: 26px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      padding: 18px;
+      display:grid;
+      grid-template-columns: .45fr .55fr;
+      gap: 16px;
+      overflow:hidden;
+    }}
+    .stepList .item {{
+      padding: 14px 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      margin-bottom: 10px;
+      cursor:pointer;
+    }}
+    .stepList .item.active {{
+      border-color: rgba(214,179,106,0.40);
+      background: rgba(214,179,106,0.10);
+    }}
+    .stepList .item .num {{ font-weight: 950; letter-spacing:.14em; color: rgba(238,242,255,0.58); font-size: 12px; }}
+    .stepList .item .ttl {{ font-weight: 950; font-size: 18px; margin-top: 6px; }}
+    .stepList .item .txt {{ color: rgba(238,242,255,0.72); font-weight: 750; margin-top: 6px; line-height: 1.5; }}
+    .scene {{
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background:
+        radial-gradient(700px 340px at 30% 20%, rgba(214,179,106,0.10), transparent 55%),
+        rgba(0,0,0,0.20);
+      padding: 18px;
+      min-height: 360px;
+      position: relative;
+      overflow:hidden;
+    }}
+    .scene .frame {{
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+      padding: 14px;
+      box-shadow: 0 20px 70px rgba(0,0,0,0.35);
+      transform: translateY(8px);
+      opacity: 0;
+      transition: opacity .45s ease, transform .45s ease;
+      position: absolute;
+      inset: 18px;
+    }}
+    .scene .frame.show {{
+      opacity: 1;
+      transform: translateY(0);
+    }}
+    .frame .hdr {{
+      display:flex; align-items:center; justify-content:space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
+    .dots {{ display:flex; gap: 6px; }}
+    .dot {{ width:10px; height:10px; border-radius: 999px; background: rgba(255,255,255,0.16); }}
+    .dot.g {{ background: rgba(214,179,106,0.50); }}
+    .mini {{
+      border-radius: 14px;
+      border: 1px dashed rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.03);
+      padding: 12px;
+      color: rgba(238,242,255,0.78);
+      font-weight: 750;
+      line-height: 1.55;
+    }}
 
-    .how {{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 18px;
-          align-items: start;
-        }}
+    .foot {{
+      padding: 28px 0 40px;
+      color: rgba(238,242,255,0.55);
+      font-weight: 800;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      margin-top: 40px;
+    }}
+    .foot a {{ color: rgba(238,242,255,0.70); }}
+    .foot a:hover {{ color: rgba(238,242,255,0.92); }}
 
-    .k {{ color: var(--gold); font-weight: 800; letter-spacing: .6px; font-size: 12px; }}
-
-    .n {{ font-size: 26px; font-weight: 800; }}
-
-    .price {{
-          padding: 22px;
-          border-radius: 22px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
-        }}
-
-    .pricing {{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-          align-items: stretch;
-        }}
-
-    .stat {{
-          padding: 16px;
-          border-radius: 18px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
-        }}
-
-    .stats {{ display:grid; gap: 14px; }}
-
-    .step {{
-          padding: 18px;
-          border-radius: 20px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
-        }}
-
-    .t {{ color: var(--muted); font-weight: 700; }}
-
-ul {{ margin: 12px 0 0 18px; padding: 0; color: var(--muted); font-weight: 650; line-height: 1.6; }}
-li {{ margin: 6px 0; }}
-.codebox {{ white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; color: rgba(238,242,255,0.85); }}
-.tag {{ display:inline-flex; align-items:center; gap:8px; padding: 7px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); color: rgba(238,242,255,0.78); font-weight: 800; font-size: 12px; }}
-.tag .dot {{ width: 8px; height: 8px; border-radius: 999px; background: var(--gold); box-shadow: 0 0 0 4px rgba(214,179,106,0.18); }}
-.reveal {{ opacity: 0; transform: translateY(14px); filter: blur(6px); transition: opacity .7s ease, transform .7s ease, filter .7s ease; }}
-.reveal.in {{ opacity: 1; transform: translateY(0); filter: blur(0); }}
-.floaty {{ animation: floaty 7s ease-in-out infinite; }}
-@keyframes floaty {{ 0%,100%{{ transform: translateY(0); }} 50%{{ transform: translateY(-8px); }} }}
-@media (prefers-reduced-motion: reduce) {{ .reveal{{ opacity: 1; transform: none; filter: none; }} .floaty{{ animation: none; }} }}
-
-@media (max-width: 920px) {{
-      .hero {{ grid-template-columns: 1fr; }}
+    @media (max-width: 980px) {{
+      .heroGrid {{ grid-template-columns: 1fr; }}
+      .titleBig {{ font-size: 42px; }}
+      .howSticky {{ grid-template-columns: 1fr; top: 74px; }}
+      .dash {{ grid-template-columns: 1fr; }}
+      .side {{ position: relative; top: 0; }}
+      .grid2 {{ grid-template-columns: 1fr; }}
       .grid3 {{ grid-template-columns: 1fr; }}
       .fields {{ grid-template-columns: 1fr; }}
-      .footgrid {{ grid-template-columns: 1fr; }}
-      .footlinks {{ justify-content: flex-start; }}
-      .cookie-inner {{ flex-direction: column; align-items: stretch; }}
+      .scene .frame {{ position: relative; inset: auto; }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      .reveal {{ opacity: 1; transform: none; filter: none; }}
+      .splash.hide {{ animation: none; opacity: 0; }}
+      .scene .frame {{ transition: none; }}
     }}
   </style>
 </head>
-<body>
+<body class="{page_class}">
   <div class="topbar">
     <div class="wrap">
       <div class="nav">
         <div class="brand">
           <div class="logo"></div>
-          <div>{esc(APP_NAME)}</div>
+          <div style="display:flex;flex-direction:column;line-height:1">
+            <div style="font-weight:950">{esc(APP_NAME)}</div>
+            <div style="font-size:12px;color:rgba(238,242,255,0.55);font-weight:850">{esc(company_name) if company_name else "Brief → Raport → Wycena"}</div>
+          </div>
         </div>
-        <div class="menu">
-          {nav}
-        </div>
-        <div class="cta">
-          <a class="btn ghost" href="/demo">Podgląd briefu</a>
-          <a class="btn" href="/login">Zaloguj</a>
-          <a class="btn gold" href="/register">Załóż konto</a>
-        </div>
+        <div class="menu">{menu}</div>
+        <div class="cta">{cta}</div>
       </div>
     </div>
   </div>
   {body}
-  <div class="foot">
-    <div class="wrap footgrid">
-      <div>
-        <div style="font-weight:900">© {esc(APP_NAME)} • {esc(datetime.datetime.utcnow().year)}</div>
-        <div class="muted" style="margin-top:6px">Brief → raport braków i ryzyk dla projektów przemysłowych.</div>
-      </div>
-      <div class="footlinks">
-        <a href="/legal/terms">Regulamin</a>
-        <a href="/legal/privacy">Prywatność</a>
-        <a href="/legal/cookies">Cookies</a>
-        <a href="/contact">Kontakt</a>
-      </div>
-    </div>
-  </div>
-
-  <div id="cookie-banner" class="cookie panel" style="display:none">
-    <div class="cookie-inner">
-      <div class="muted" style="flex:1">
-        Używamy wyłącznie niezbędnych cookies do logowania i działania panelu.
-        <a href="/legal/cookies">Dowiedz się więcej</a>.
-      </div>
-      <div style="display:flex; gap:10px; align-items:center; justify-content:flex-end;">
-        <button class="btn gold" id="cookie-ok" type="button">OK</button>
-      </div>
-    </div>
-  </div>
 <script>
 (() => {{
+  // Reveal on scroll
   const els = Array.from(document.querySelectorAll('[data-reveal]'));
-  if (!els.length) return;
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduce || !('IntersectionObserver' in window)) {{ els.forEach(el => el.classList.add('in')); return; }}
-  const io = new IntersectionObserver((entries) => {{
-    for (const e of entries) {{
-      if (e.isIntersecting) {{ e.target.classList.add('in'); io.unobserve(e.target); }}
+  if (els.length) {{
+    if (reduce || !('IntersectionObserver' in window)) {{ els.forEach(el => el.classList.add('in')); }}
+    else {{
+      const io = new IntersectionObserver((entries) => {{
+        for (const e of entries) {{
+          if (e.isIntersecting) {{ e.target.classList.add('in'); io.unobserve(e.target); }}
+        }}
+      }}, {{ threshold: 0.12 }});
+      els.forEach(el => {{ el.classList.add('reveal'); io.observe(el); }});
     }}
-  }}, {{ threshold: 0.12 }});
-  els.forEach(el => {{ el.classList.add('reveal'); io.observe(el); }});
-}})();
+  }}
 
-(() => {{
-  const key = "archibot_cookie_ok_v1";
-  const banner = document.getElementById("cookie-banner");
-  if (!banner) return;
-  try {{
-    if (localStorage.getItem(key) === "1") return;
-  }} catch (e) {{}}
-  banner.style.display = "block";
-  const btn = document.getElementById("cookie-ok");
-  if (btn) {{
-    btn.addEventListener("click", () => {{
-      try {{ localStorage.setItem(key, "1"); }} catch (e) {{}}
-      banner.style.display = "none";
+  // Copy helpers
+  document.addEventListener('click', async (ev) => {{
+    const t = ev.target;
+    if (!(t instanceof HTMLElement)) return;
+    const btn = t.closest('[data-copy],[data-copy-text]');
+    if (!btn) return;
+    const sel = btn.getAttribute('data-copy');
+    const el = sel ? document.querySelector(sel) : null;
+    const txt = el ? (el.textContent || '') : (btn.getAttribute('data-copy-text') || '');
+    try {{
+      await navigator.clipboard.writeText(txt.trim());
+      const old = btn.textContent || '';
+      btn.textContent = 'Skopiowano';
+      setTimeout(() => btn.textContent = old || 'Kopiuj', 1200);
+    }} catch(e) {{
+      alert('Nie udało się skopiować. Zaznacz tekst i skopiuj ręcznie.');
+    }}
+  }});
+
+  // Home: splash once per session
+  const splash = document.getElementById('splash');
+  if (splash) {{
+    const key = 'ab_splash_once_v1';
+    const already = sessionStorage.getItem(key);
+    const hide = () => {{
+      if (splash.classList.contains('hide')) return;
+      document.body.classList.remove('no-scroll');
+      splash.classList.add('hide');
+      setTimeout(() => splash.remove(), 920);
+    }};
+    if (already) {{
+      splash.remove();
+    }} else {{
+      document.body.classList.add('no-scroll');
+      sessionStorage.setItem(key, '1');
+      setTimeout(hide, 2200);
+      window.addEventListener('wheel', hide, {{ passive:true, once:true }});
+      window.addEventListener('touchstart', hide, {{ passive:true, once:true }});
+      splash.addEventListener('click', hide, {{ once:true }});
+    }}
+  }}
+
+  // Home: scroll slides
+  const shell = document.getElementById('howShell');
+  if (shell) {{
+    const frames = Array.from(document.querySelectorAll('.scene .frame'));
+    const items = Array.from(document.querySelectorAll('.stepList .item'));
+    const n = Math.max(frames.length, items.length);
+    function setActive(i) {{
+      frames.forEach((f, idx) => f.classList.toggle('show', idx===i));
+      items.forEach((it, idx) => it.classList.toggle('active', idx===i));
+    }}
+    function clamp(v, a, b) {{ return Math.max(a, Math.min(b, v)); }}
+    function onScroll() {{
+      const rect = shell.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+      const total = rect.height - vh;
+      const y = clamp(-rect.top, 0, total);
+      const p = total > 0 ? y / total : 0;
+      const idx = clamp(Math.floor(p * n), 0, n-1);
+      setActive(idx);
+    }}
+    items.forEach((it, idx) => {{
+      it.addEventListener('click', () => {{
+        const rect = shell.getBoundingClientRect();
+        const top = window.scrollY + rect.top;
+        const target = top + (idx / n) * (rect.height - (window.innerHeight||800));
+        window.scrollTo({{ top: target, behavior: 'smooth' }});
+      }});
     }});
+    window.addEventListener('scroll', onScroll, {{ passive:true }});
+    window.addEventListener('resize', onScroll);
+    setTimeout(onScroll, 0);
   }}
 }})();
 </script>
@@ -1182,12 +1331,13 @@ li {{ margin: 6px 0; }}
 
 def nav_links() -> str:
     return """
+      <a href="/#jak">Jak działa</a>
       <a href="/#funkcje">Funkcje</a>
       <a href="/#raport">Raport</a>
-      <a href="/#jak">Jak działa</a>
-      <a href="/#cennik">Plany</a>
+      <a href="/#plany">Plany</a>
       <a href="/#faq">FAQ</a>
     """
+
 
 
 # =========================
@@ -1796,428 +1946,317 @@ def flash_html(msg: str) -> str:
 # =========================
 
 @app.get("/", response_class=HTMLResponse)
-def home():
-    # Krótki podgląd – bez ściany tekstu na landing
-    preview_p0 = [
-        "Brak MPZP/WZ lub niepewna podstawa planistyczna",
-        "Brak mocy przyłączeniowej / niejasne warunki mediów",
-        "PPOŻ: sprinkler / strefy pożarowe / źródło wody – do potwierdzenia",
-        "Logistyka: liczba doków, drogi pożarowe, plac manewrowy – nieokreślone",
-    ]
-    preview_docs = [
-        "MPZP/WZ + wypis/wyrys",
-        "Mapa do celów projektowych 1:500",
-        "Geotechnika + wody gruntowe",
-        "Warunki przyłączeń (EE, woda, kanalizacja, gaz)",
-    ]
+def home(request: Request):
+    free_card = ""
+    if ENABLE_FREE_PLAN:
+        free_card = f'''
+        <div class="panel card" data-reveal style="border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07);">
+          <div class="k">BETA</div>
+          <div class="n" style="font-size:28px;margin-top:8px">0 zł</div>
+          <div class="t">Na start / testy. Limit: {FREE_FORMS_PER_MONTH_LIMIT} formularze / mies.</div>
+          <div class="divider"></div>
+          <div class="muted">• Panel firmy + architekci</div>
+          <div class="muted">• Brief + raport</div>
+          <div class="muted">• Cennik firmy do wycen (opcjonalnie)</div>
+          <div style="height:14px"></div>
+          <div class="actions">
+            <a class="btn gold" href="/register">Załóż konto</a>
+            <a class="btn ghost" href="/login">Logowanie</a>
+          </div>
+        </div>
+        '''
 
-    free_card = """
-            <div class=\"price\" style=\"border-color: rgba(214,179,106,0.35); background: rgba(214,179,106,0.07)\" data-reveal>
-              <div class=\"tag\"><span class=\"dot\"></span>Beta 0 zł</div>
-              <h3 style=\"margin:10px 0 0\">Beta (0 zł)</h3>
-              <div class=\"big\">0 zł</div>
-              <div class=\"muted\">Bez karty. Limit: <b>""" + str(FREE_FORMS_PER_MONTH_LIMIT) + """ formularze / miesiąc</b>.</div>
-              <ul>
-                <li>Panel firmy + architekci</li>
-                <li>Brief + raport (braki, ryzyka, pytania)</li>
-                <li>Gotowy email do klienta</li>
-              </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn gold\" href=\"/register\">Odbierz dostęp</a></div>
-            </div>
-    """ if ENABLE_FREE_PLAN else ""
+    body = f'''
+    <div id="splash" class="splash">
+      <div class="box">
+        <svg viewBox="0 0 1200 240" role="img" aria-label="ArchiBot">
+          <defs>
+            <linearGradient id="g" x1="0" x2="1">
+              <stop offset="0" stop-color="#D6B36A"/>
+              <stop offset="1" stop-color="#EEF2FF"/>
+            </linearGradient>
+          </defs>
+          <text x="50%" y="62%" text-anchor="middle"
+                font-family="Syne, system-ui, sans-serif"
+                font-size="160"
+                font-weight="800"
+                fill="transparent"
+                stroke="url(#g)"
+                stroke-width="4"
+                stroke-linejoin="round"
+                style="letter-spacing:-0.02em; paint-order: stroke;">
+            ArchiBot
+          </text>
+          <style>
+            text {{
+              stroke-dasharray: 2200;
+              stroke-dashoffset: 2200;
+              animation: draw 2.05s ease forwards;
+            }}
+            @keyframes draw {{
+              to {{ stroke-dashoffset: 0; }}
+            }}
+          </style>
+        </svg>
+        <div class="hint">SCROLL / CLICK</div>
+      </div>
+    </div>
 
-    body = f"""
-    <div class=\"deck\">
-      <section class=\"slide\" id=\"top\">
-        <div class=\"wrap hero\">
-          <div data-reveal>
-            <div class=\"kicker\">
-              <span class=\"tag\"><span class=\"dot\"></span>Brief inwestora, który domyka wycenę</span>
-            </div>
-            <h1>Inwestor wypełnia brief. Ty dostajesz <span class=\"gold\">raport braków i ryzyk</span>.</h1>
-            <p class=\"lead\">
-              ArchiBot standaryzuje zbieranie danych dla obiektów przemysłowych: hale, magazyny, logistyka.
-              Koniec „dopytywania w 20 mailach” i wyceny na oślep.
+    <div class="wrap">
+      <section class="heroHome" id="top">
+        <div class="heroGrid">
+          <div>
+            <div class="tag" data-reveal><span class="dot"></span> Brief → Raport → Wycena (przemysł)</div>
+            <div style="height:12px"></div>
+            <h1 class="titleBig" data-reveal>
+              Architekt nie traci czasu na <span class="gold">chaos</span>.
+            </h1>
+            <p class="lead" data-reveal style="max-width:70ch">
+              ArchiBot zamienia nieuporządkowane informacje od inwestora w <b>raport do domknięcia wyceny</b>:
+              braki, ryzyka, pytania blokujące, lista dokumentów i gotowa wiadomość do klienta.
             </p>
-
-            <div style=\"height:18px\"></div>
-            <div class=\"cta\" style=\"justify-content:flex-start\">
-              <a class=\"btn gold\" href=\"/register\">Start (Beta 0 zł)</a>
-              <a class=\"btn\" href=\"/demo\">Zobacz brief</a>
-              <a class=\"btn\" href=\"/report-demo\">Zobacz raport</a>
+            <div style="height:16px"></div>
+            <div class="actions" data-reveal>
+              <a class="btn gold" href="/register">Załóż konto</a>
+              <a class="btn" href="/login">Zaloguj</a>
+              <a class="btn ghost" href="#jak">Zobacz jak działa</a>
+              <a class="btn ghost" href="/demo">Podgląd briefu</a>
+              <a class="btn ghost" href="/report-demo">Podgląd raportu</a>
             </div>
-
-            <div style=\"height:18px\"></div>
-            <div class=\"grid3\" style=\"grid-template-columns: repeat(3, 1fr);\">
-              <div class=\"stat\" data-reveal><div class=\"k\">CO DOSTAJESZ</div><div class=\"n\">Raport</div><div class=\"t\">P0/P1, braki, pytania, kroki + email.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">DLA KOGO</div><div class=\"n\">Przemysł</div><div class=\"t\">Hale, magazyny, zakłady, cross-dock.</div></div>
-              <div class=\"stat\" data-reveal><div class=\"k\">KORZYŚĆ</div><div class=\"n\">Wycena</div><div class=\"t\">Szybciej domykasz zakres i ryzyka.</div></div>
-            </div>
-
-            <div style=\"height:18px\"></div>
-            <div class=\"grid3\" style=\"grid-template-columns: repeat(4, 1fr);\">
-              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">RODO / dane</h3><p class=\"muted\" style=\"margin:0\">Tylko dane potrzebne do briefu. Brak śledzących cookies.</p></div>
-              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Anulowanie</h3><p class=\"muted\" style=\"margin:0\">Subskrypcję anulujesz w panelu (1 klik).</p></div>
-              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Limity</h3><p class=\"muted\" style=\"margin:0\">Jasny limit formularzy / miesiąc per plan.</p></div>
-              <div class=\"tile\" data-reveal><h3 style=\"margin:0 0 6px\">Wdrożenie</h3><p class=\"muted\" style=\"margin:0\">Link do briefu dla każdego architekta.</p></div>
-            </div>
+            <div style="height:16px"></div>
+            <div class="muted" data-reveal>Wersja BETA: włączasz, dodajesz architekta, wysyłasz link do inwestora – reszta dzieje się automatycznie.</div>
           </div>
 
-          <div class=\"panel card floaty\" data-reveal>
-            <div style=\"font-weight:900\">Podgląd: co wyłapie raport</div>
-            <div class=\"muted\" style=\"margin-top:6px\">Zamiast czytać 5 stron – widzisz konkret.</div>
-            <div style=\"height:12px\"></div>
-
-            <div class=\"stat\">
-              <div style=\"font-weight:900\">Blockery (P0)</div>
-              <ul style=\"margin:10px 0 0 18px\">
-                {''.join('<li>'+esc(x)+'</li>' for x in preview_p0)}
-              </ul>
-            </div>
-
-            <div style=\"height:10px\"></div>
-
-            <div class=\"stat\">
-              <div style=\"font-weight:900\">Brakujące dokumenty</div>
-              <ul style=\"margin:10px 0 0 18px\">
-                {''.join('<li>'+esc(x)+'</li>' for x in preview_docs)}
-              </ul>
-            </div>
-
-            <div style=\"height:14px\"></div>
-            <div class=\"actions\">
-              <a class=\"btn gold\" href=\"/report-demo\">Zobacz pełny przykład</a>
-              <a class=\"btn\" href=\"/demo\">Wypełnij demo</a>
+          <div class="heroCard panel" data-reveal>
+            <div class="k">DLACZEGO TO SPRZEDAJE</div>
+            <div class="divider"></div>
+            <div class="muted">• Ucinamy niedopowiedzenia na starcie.</div>
+            <div class="muted">• Zwiększasz skuteczność wyceny (mniej „wróćmy za tydzień”).</div>
+            <div class="muted">• Masz gotową listę pytań P0/P1/P2 do klienta.</div>
+            <div class="divider"></div>
+            <div class="actions">
+              <a class="btn gold" href="#plany">Zobacz plany</a>
+              <a class="btn" href="/register">Start</a>
             </div>
           </div>
         </div>
       </section>
 
-      <section class=\"slide\" id=\"funkcje\">
-        <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Funkcje</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Jeden standard briefu + raport, który prowadzi doprecyzowanie zakresu i wyceny.</p>
-          <div style=\"height:18px\"></div>
-          <div class=\"grid3\">
-            <div class=\"tile\" data-reveal><h3>Brief przemysłowy</h3><p class=\"muted\">Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</p></div>
-            <div class=\"tile\" data-reveal><h3>Ryzyka i braki</h3><p class=\"muted\">Priorytety (P0/P1/P2), brakujące dokumenty, niejasności do doprecyzowania.</p></div>
-            <div class=\"tile\" data-reveal><h3>Gotowy email</h3><p class=\"muted\">Wiadomość do klienta: prośba o uzupełnienia + lista pytań krytycznych.</p></div>
+      <section class="howShow" id="jak">
+        <div style="height:8px"></div>
+        <div class="k" data-reveal>POKAZ KROK PO KROKU</div>
+        <div style="height:10px"></div>
+        <h2 class="h1" data-reveal style="margin:0">Przewijasz — a system pokazuje, co się dzieje</h2>
+        <p class="lead" data-reveal style="max-width:75ch">To ma być proste dla kogoś, kto wchodzi pierwszy raz. Zero ściany tekstu.</p>
+        <div style="height:14px"></div>
+
+        <div id="howShell" class="howShell">
+          <div class="howSticky">
+            <div class="stepList">
+              <div class="item active" data-reveal>
+                <div class="num">KROK 01</div>
+                <div class="ttl">Ustawiasz pracownię</div>
+                <div class="txt">Dodajesz architekta i (opcjonalnie) cennik — raport podciągnie to do wyceny.</div>
+              </div>
+              <div class="item" data-reveal>
+                <div class="num">KROK 02</div>
+                <div class="ttl">Inwestor wypełnia brief</div>
+                <div class="txt">Jedno miejsce na formalności, media, logistykę, PPOŻ/BHP, technologię.</div>
+              </div>
+              <div class="item" data-reveal>
+                <div class="num">KROK 03</div>
+                <div class="ttl">AI składa raport</div>
+                <div class="txt">Braki, ryzyka, pytania blokujące, lista dokumentów, następne kroki.</div>
+              </div>
+              <div class="item" data-reveal>
+                <div class="num">KROK 04</div>
+                <div class="ttl">Domykasz wycenę</div>
+                <div class="txt">Masz gotową wiadomość do klienta i listę tematów do spotkania.</div>
+              </div>
+            </div>
+
+            <div class="scene" data-reveal>
+              <div class="frame show">
+                <div class="hdr">
+                  <div class="pill"><span class="dot g"></span> Panel • Ustawienia</div>
+                  <div class="dots"><span class="dot g"></span><span class="dot"></span><span class="dot"></span></div>
+                </div>
+                <div class="mini">
+                  <b>Dodaj architekta</b> → system generuje link do briefu.<br/>
+                  <b>Wklej cennik</b> → raport liczy widełki i uzasadnia.
+                </div>
+                <div style="height:12px"></div>
+                <div class="mini">✅ Checklist: architekt dodany, cennik wklejony, plan aktywny.</div>
+              </div>
+
+              <div class="frame">
+                <div class="hdr">
+                  <div class="pill"><span class="dot g"></span> Brief • Formularz</div>
+                  <div class="dots"><span class="dot"></span><span class="dot g"></span><span class="dot"></span></div>
+                </div>
+                <div class="mini">
+                  Inwestor uzupełnia: działka, media, proces, logistyka, BHP/PPOŻ.<br/>
+                  Puste pola są OK — raport je wyłapie jako braki.
+                </div>
+                <div style="height:12px"></div>
+                <div class="mini">📎 Załączniki: MPZP/WZ, geotechnika, warunki przyłączy (opcjonalnie).</div>
+              </div>
+
+              <div class="frame">
+                <div class="hdr">
+                  <div class="pill"><span class="dot g"></span> Raport • P0/P1/P2</div>
+                  <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot g"></span></div>
+                </div>
+                <div class="mini">
+                  <b>P0 (blokery):</b> sprinkler? suwnica? wysokość podhacznikowa? OOŚ?<br/>
+                  <b>P1:</b> etapowanie, FM 24/7, standard biur.<br/>
+                  <b>P2:</b> BIM, ESG, opcje.
+                </div>
+                <div style="height:12px"></div>
+                <div class="mini">📩 Raport idzie na mail architekta + zapis do historii.</div>
+              </div>
+
+              <div class="frame">
+                <div class="hdr">
+                  <div class="pill"><span class="dot g"></span> Wycena • Domknięcie</div>
+                  <div class="dots"><span class="dot g"></span><span class="dot"></span><span class="dot g"></span></div>
+                </div>
+                <div class="mini">
+                  Gotowa wiadomość do klienta: „prosimy o uzupełnienia” + lista pytań.<br/>
+                  Szybciej domykasz zakres i minimalizujesz ryzyko niedoszacowania.
+                </div>
+                <div style="height:12px"></div>
+                <div class="actions">
+                  <a class="btn gold" href="/register">Uruchom u siebie</a>
+                  <a class="btn" href="/dashboard">Wejdź do panelu</a>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
 
-      <section class=\"slide\" id=\"raport\">
-        <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Raport demo</h1>
-          <p class=\"lead\" style=\"max-width:70ch\" data-reveal>Przykład w układzie, który da się wkleić do maila/oferty. Pełny przykład jest na osobnej stronie.</p>
-          <div style=\"height:18px\"></div>
-
-          <div class=\"grid3\" style=\"grid-template-columns: repeat(2, 1fr);\">
-            <div class=\"panel card\" data-reveal>
-              <div class=\"tag\"><span class=\"dot\"></span>P0 – blockery</div>
-              <div style=\"height:10px\"></div>
-              <ul>
-                <li>Podstawa planistyczna (MPZP/WZ) – brak/niepewne</li>
-                <li>Media: moc + warunki przyłączeń – brak skanów</li>
-                <li>PPOŻ: sprinkler + źródło wody – do potwierdzenia</li>
-                <li>Logistyka: doki/rampa/plac – nieustalone</li>
-              </ul>
-            </div>
-
-            <div class=\"panel card\" data-reveal>
-              <div class=\"tag\"><span class=\"dot\"></span>P1 – ryzyka</div>
-              <div style=\"height:10px\"></div>
-              <ul>
-                <li>Posadzka: obciążenia punktowe / strefowanie – do ustalenia</li>
-                <li>Retencja i deszczówka – ryzyko formalne/kosztowe</li>
-                <li>Kolizje z sieciami – ryzyko harmonogramu</li>
-                <li>Wymogi audytów (ISO/HACCP/ATEX) – wpływ na projekt</li>
-              </ul>
-            </div>
+      <section id="funkcje" style="padding: 24px 0 0">
+        <div class="k" data-reveal>FUNKCJE</div>
+        <div style="height:10px"></div>
+        <h2 class="h1" data-reveal style="margin:0">Wersja „dla przemysłu” — nie ogólnik</h2>
+        <div style="height:14px"></div>
+        <div class="grid3">
+          <div class="panel card" data-reveal>
+            <div class="k">BRIEF</div>
+            <div class="n">Komplet pytań</div>
+            <div class="t">Formalne, media, grunt, technologia, logistyka, PPOŻ/BHP, parametry obiektu.</div>
           </div>
-
-          <div style=\"height:14px\"></div>
-          <div class=\"actions\" data-reveal>
-            <a class=\"btn gold\" href=\"/report-demo\">Zobacz pełny przykład raportu</a>
-            <a class=\"btn\" href=\"/demo\">Wypełnij demo brief</a>
+          <div class="panel card" data-reveal>
+            <div class="k">RAPORT</div>
+            <div class="n">Ryzyka i braki</div>
+            <div class="t">Priorytety P0/P1/P2, brakujące dokumenty, niejasności do doprecyzowania.</div>
+          </div>
+          <div class="panel card" data-reveal>
+            <div class="k">SPRZEDAŻ</div>
+            <div class="n">Email do klienta</div>
+            <div class="t">Copy/paste: prośba o uzupełnienia + lista pytań krytycznych.</div>
           </div>
         </div>
       </section>
 
-      <section class=\"slide\" id=\"jak\">
-        <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Jak to działa</h1>
-          <div class=\"how\">
-            <div class=\"step\" data-reveal><div class=\"k\">KROK 01</div><h3>Dodajesz architekta</h3><p class=\"muted\">W panelu dodajesz osoby, które mają dostać raport.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">KROK 02</div><h3>Wysyłasz link do inwestora</h3><p class=\"muted\">Kopiujesz link do briefu i wysyłasz go do klienta.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">KROK 03</div><h3>Powstaje raport</h3><p class=\"muted\">Braki, ryzyka, pytania krytyczne, dokumenty, następne kroki + email.</p></div>
-            <div class=\"step\" data-reveal><div class=\"k\">KROK 04</div><h3>Doprecyzowujesz zakres</h3><p class=\"muted\">Masz gotową listę do klienta → szybciej domykasz wycenę.</p></div>
+      <section id="raport" style="padding: 26px 0 0">
+        <div class="panel card" data-reveal>
+          <div class="k">RAPORT</div>
+          <div class="n" style="font-size:26px;margin-top:10px">Zobacz fragment raportu — bez konta</div>
+          <div class="t">Dokładnie to dostajesz na mail (i w historii w panelu).</div>
+          <div style="height:14px"></div>
+          <div class="actions">
+            <a class="btn gold" href="/report-demo">Podgląd raportu</a>
+            <a class="btn" href="/demo">Podgląd briefu</a>
+            <a class="btn ghost" href="/register">Start</a>
           </div>
         </div>
       </section>
 
-      <section class=\"slide\" id=\"cennik\">
-        <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>Plany</h1>
-          <p class=\"lead\" style=\"max-width:78ch\" data-reveal>
-            Subskrypcja odnawialna. Anulowanie i faktury: w panelu (Stripe portal).
-            Beta 0 zł jest bez karty.
-          </p>
-          <div style=\"height:18px\"></div>
-          <div class=\"pricing\" style=\"grid-template-columns: repeat(3, 1fr);\">
-            {free_card}
-            <div class=\"price\" data-reveal>
-              <h3>Miesięcznie</h3>
-              <div class=\"big\">249 zł</div>
-              <div class=\"muted\">Dla pracowni z ciągłym napływem briefów.</div>
-              <ul>
-                <li>Panel firmy + architekci</li>
-                <li>Brief + raport</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
-                <li>Cennik firmy do wycen</li>
-                <li>Anulujesz w panelu (1 klik)</li>
-              </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
-            </div>
-            <div class=\"price\" data-reveal>
-              <h3>Rocznie</h3>
-              <div class=\"big\">2 690 zł</div>
-              <div class=\"muted\">Dla pracowni pracujących w trybie ciągłym.</div>
-              <ul>
-                <li>To samo co miesięcznie</li>
-                <li>Maks. {FORMS_PER_MONTH_LIMIT} formularzy / miesiąc</li>
-                <li>Wsparcie wdrożeniowe</li>
-                <li>Anulujesz w panelu (1 klik)</li>
-              </ul>
-              <div class=\"actions\" style=\"margin-top:14px\"><a class=\"btn\" href=\"/register\">Załóż konto</a></div>
+      <section id="plany" style="padding: 28px 0 0">
+        <div class="k" data-reveal>PLANY</div>
+        <div style="height:10px"></div>
+        <h2 class="h1" data-reveal style="margin:0">Proste. Bez „ukrytych” rzeczy.</h2>
+        <p class="lead" data-reveal style="max-width:75ch">Subskrypcję anulujesz jednym kliknięciem w portalu Stripe (link w panelu).</p>
+        <div style="height:14px"></div>
+
+        <div class="grid3" style="align-items: stretch;">
+          {free_card}
+          <div class="panel card" data-reveal>
+            <div class="k">MIESIĘCZNIE</div>
+            <div class="n" style="font-size:28px;margin-top:8px">249 zł</div>
+            <div class="t">Limit: {FORMS_PER_MONTH_LIMIT} formularzy / mies.</div>
+            <div class="divider"></div>
+            <div class="muted">• Panel + architekci</div>
+            <div class="muted">• Historia raportów</div>
+            <div class="muted">• Cennik firmy (opcjonalnie)</div>
+            <div style="height:14px"></div>
+            <div class="actions">
+              <a class="btn gold" href="/register">Załóż konto</a>
+              <a class="btn ghost" href="/login">Logowanie</a>
             </div>
           </div>
-          <div class=\"muted\" style=\"margin-top:14px\" data-reveal>
-            * Ceny przykładowe. Szczegóły: <a href=\"/legal/terms\" style=\"text-decoration:underline\">Regulamin</a>.
+
+          <div class="panel card" data-reveal>
+            <div class="k">ROCZNIE</div>
+            <div class="n" style="font-size:28px;margin-top:8px">2 690 zł</div>
+            <div class="t">Limit: {FORMS_PER_MONTH_LIMIT} formularzy / mies.</div>
+            <div class="divider"></div>
+            <div class="muted">• To samo co miesięcznie</div>
+            <div class="muted">• Stabilne rozliczenie</div>
+            <div class="muted">• Wsparcie wdrożeniowe</div>
+            <div style="height:14px"></div>
+            <div class="actions">
+              <a class="btn gold" href="/register">Załóż konto</a>
+              <a class="btn ghost" href="/login">Logowanie</a>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class=\"slide\" id=\"faq\">
-        <div class=\"wrap\">
-          <h1 style=\"margin:0 0 14px\" data-reveal>FAQ</h1>
-          <div class=\"panel card\" data-reveal>
-            <p class=\"muted\"><b>Czy wszystkie pola muszą być wypełnione?</b><br/>Nie. Raport pokazuje braki i pytania uzupełniające.</p>
-            <p class=\"muted\"><b>Czy inwestor widzi raport?</b><br/>Nie. Raport jest dla architekta / zespołu projektowego.</p>
-            <p class=\"muted\"><b>Czy da się anulować subskrypcję?</b><br/>Tak. W panelu jest przycisk „Zarządzaj subskrypcją” (Stripe portal).</p>
-            <p class=\"muted\"><b>Gdzie są faktury?</b><br/>W tym samym miejscu – w portalu rozliczeń.</p>
-            <p class=\"muted\"><b>Jak przekazać brief inwestorowi?</b><br/>W panelu kopiujesz link pod architektem i wysyłasz go do inwestora.</p>
+      <section id="faq" style="padding: 28px 0 0">
+        <div class="k" data-reveal>FAQ</div>
+        <div style="height:10px"></div>
+        <div class="grid2">
+          <div class="panel card" data-reveal>
+            <div class="n" style="font-size:18px">Czy inwestor widzi raport?</div>
+            <div class="t">Nie. Raport jest dla architekta / zespołu projektowego.</div>
           </div>
-          <div style=\"height:18px\"></div>
-          <div class=\"cta\" style=\"justify-content:flex-start\" data-reveal>
-            <a class=\"btn gold\" href=\"/register\">Załóż konto</a>
-            <a class=\"btn\" href=\"/login\">Zaloguj</a>
+          <div class="panel card" data-reveal>
+            <div class="n" style="font-size:18px">Czy wszystkie pola muszą być wypełnione?</div>
+            <div class="t">Nie. Raport pokaże braki i pytania uzupełniające.</div>
+          </div>
+          <div class="panel card" data-reveal>
+            <div class="n" style="font-size:18px">Jak inwestor dostaje formularz?</div>
+            <div class="t">W panelu generujesz link przy architekcie i wysyłasz do inwestora.</div>
+          </div>
+          <div class="panel card" data-reveal>
+            <div class="n" style="font-size:18px">Jak anulować subskrypcję?</div>
+            <div class="t">W panelu jest przycisk „Zarządzaj subskrypcją” (portal Stripe) — tam anulujesz w 1 klik.</div>
+          </div>
+        </div>
+
+        <div class="foot">
+          <div class="wrap" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>© {esc(APP_NAME)} • {esc(datetime.datetime.utcnow().year)}</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <a href="/terms">Regulamin</a>
+              <a href="/privacy">Polityka prywatności</a>
+              <a href="/security">Bezpieczeństwo</a>
+            </div>
           </div>
         </div>
       </section>
     </div>
-    """
+    '''
 
-    return HTMLResponse(layout("Start", body=body, nav=nav_links()))
-
+    return HTMLResponse(layout("Start", body=body, nav=nav_links(), request=request, page="home"))
 
 # =========================
 # 11) Auth: rejestracja / logowanie – bez zmian
 # =========================
-
-
-# =========================
-# 10A) Podgląd raportu + strony legalne (must-have pod sprzedaż)
-# =========================
-
-@app.get("/report-demo", response_class=HTMLResponse)
-def report_demo():
-    body = f"""
-    <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">Raport demo (przykład)</h1>
-      <p class="lead" style="max-width:80ch">To jest przykład układu raportu. W realnym flow raport trafia na email architekta po zatwierdzeniu briefu.</p>
-
-      <div style="height:14px"></div>
-
-      <div class="grid3" style="grid-template-columns: repeat(2, 1fr); align-items:start;">
-        <div class="panel card">
-          <div class="tag"><span class="dot"></span>P0 – blockery (bez tego nie domykasz wyceny)</div>
-          <ul>
-            <li>MPZP/WZ: brak skanów / niepewna podstawa planistyczna</li>
-            <li>Media: moc + warunki przyłączeń – brak</li>
-            <li>PPOŻ: sprinkler / źródło wody / strefy – do potwierdzenia</li>
-            <li>Technologia: parametry suwnicy / maszyn – niepełne</li>
-          </ul>
-        </div>
-
-        <div class="panel card">
-          <div class="tag"><span class="dot"></span>P1 – ryzyka (koszt/harmonogram)</div>
-          <ul>
-            <li>Posadzka: obciążenia punktowe / strefy – ryzyko dopłat</li>
-            <li>Retencja i deszczówka – ryzyko formalne i CAPEX</li>
-            <li>Kolizje z sieciami / dojazdem – ryzyko czasu</li>
-            <li>Audyty/standardy (ISO/HACCP/ATEX) – wpływ na projekt</li>
-          </ul>
-        </div>
-
-        <div class="panel card">
-          <div class="tag"><span class="dot"></span>Brakujące dokumenty</div>
-          <ul>
-            <li>MPZP/WZ + wypis/wyrys</li>
-            <li>Mapa do celów projektowych 1:500</li>
-            <li>Geotechnika + wody gruntowe</li>
-            <li>Warunki przyłączeń (EE, woda, kanalizacja, gaz)</li>
-            <li>Wstępny layout technologii (URS)</li>
-          </ul>
-        </div>
-
-        <div class="panel card">
-          <div class="tag"><span class="dot"></span>Gotowy email do inwestora</div>
-          <div class="codebox">Temat: Prośba o uzupełnienie briefu – dokumenty i pytania (P0)
-
-Dzień dobry,
-dziękujemy za przesłany brief. Żeby domknąć zakres i wycenę, potrzebujemy uzupełnień:
-1) MPZP/WZ + wypis/wyrys, mapa 1:500, geotechnika, warunki przyłączeń.
-2) PPOŻ: czy wymagany sprinkler i jakie źródło wody?
-3) Technologia: parametry suwnicy / maszyn (udźwig, rozpiętość, media).
-4) Logistyka: liczba doków, plac manewrowy, okna dostaw.
-
-Pozdrawiam,
-Zespół projektowy</div>
-        </div>
-      </div>
-
-      <div style="height:16px"></div>
-      <div class="actions">
-        <a class="btn gold" href="/demo">Wypełnij demo brief</a>
-        <a class="btn" href="/register">Załóż konto</a>
-      </div>
-    </div>
-    """
-    return HTMLResponse(layout("Raport demo", body=body, nav=nav_links()))
-
-
-def _legal_page(title: str, heading: str, inner_html: str) -> HTMLResponse:
-    body = f"""
-    <div class="wrap formwrap">
-      <h1 style="margin:0 0 10px">{esc(heading)}</h1>
-      <div class="panel card">
-        <div class="muted" style="max-width:92ch">
-          {inner_html}
-        </div>
-      </div>
-      <div class="actions" style="margin-top:14px">
-        <a class="btn" href="/">Strona główna</a>
-        <a class="btn" href="/contact">Kontakt</a>
-      </div>
-    </div>
-    """
-    return HTMLResponse(layout(title, body=body, nav=nav_links()))
-
-
-@app.get("/legal/terms", response_class=HTMLResponse)
-def legal_terms():
-    inner = f"""
-      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
-      <p><b>To jest szablon.</b> Zanim zaczniesz sprzedawać, wklej tu własny regulamin przygotowany pod Twoją firmę i model sprzedaży (B2B/B2C, zwroty, faktury, itp.).</p>
-
-      <h3 style="margin:18px 0 8px">1. Usługa</h3>
-      <ul>
-        <li>ArchiBot umożliwia zbieranie danych od inwestora przez formularz oraz generuje raport dla architekta.</li>
-        <li>Raport ma charakter pomocniczy (brief + wstępna analiza ryzyk), nie zastępuje projektu ani uzgodnień.</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">2. Konto</h3>
-      <ul>
-        <li>Dostęp do panelu wymaga konta (email + hasło).</li>
-        <li>Użytkownik odpowiada za linki do briefu udostępniane inwestorom.</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">3. Płatności i subskrypcja</h3>
-      <ul>
-        <li>Płatności obsługuje Stripe (subskrypcja odnawialna automatycznie do czasu anulowania).</li>
-        <li><b>Anulowanie:</b> w panelu firmy (przycisk „Zarządzaj subskrypcją”). Po anulowaniu plan wygasa zgodnie z okresem rozliczeniowym.</li>
-        <li>Faktury/rachunki: dostępne w portalu rozliczeń Stripe.</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">4. Ograniczenie odpowiedzialności</h3>
-      <ul>
-        <li>Usługa nie gwarantuje kompletności danych od inwestora.</li>
-        <li>Decyzje projektowe i formalne należą do użytkownika (architekta/pracowni).</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">5. Reklamacje</h3>
-      <ul>
-        <li>Kontakt: patrz strona „Kontakt”.</li>
-      </ul>
-    """
-    return _legal_page("Regulamin", "Regulamin", inner)
-
-
-@app.get("/legal/privacy", response_class=HTMLResponse)
-def legal_privacy():
-    inner = f"""
-      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
-      <p><b>To jest szablon.</b> Uzupełnij o dane administratora, podstawy prawne, odbiorców i okresy retencji.</p>
-
-      <h3 style="margin:18px 0 8px">Jakie dane zbieramy</h3>
-      <ul>
-        <li>Dane konta: email, nazwa firmy, hasło (hash).</li>
-        <li>Dane z briefu: informacje podane przez inwestora w formularzu.</li>
-        <li>Dane rozliczeniowe: jeśli podasz w panelu (np. NIP/adres).</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">W jakim celu</h3>
-      <ul>
-        <li>Świadczenie usługi (panel, formularze, raporty).</li>
-        <li>Kontakt i wsparcie.</li>
-        <li>Rozliczenia (jeśli dotyczy).</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">Podmioty przetwarzające</h3>
-      <ul>
-        <li>Stripe – płatności i portal rozliczeń (jeśli plan płatny).</li>
-        <li>Dostawcy infrastruktury hostingowej.</li>
-        <li>OpenAI – generowanie raportu (jeśli funkcja AI jest włączona).</li>
-      </ul>
-
-      <h3 style="margin:18px 0 8px">Twoje prawa</h3>
-      <ul>
-        <li>Dostęp, sprostowanie, usunięcie, ograniczenie, sprzeciw.</li>
-      </ul>
-    """
-    return _legal_page("Prywatność", "Polityka prywatności", inner)
-
-
-@app.get("/legal/cookies", response_class=HTMLResponse)
-def legal_cookies():
-    inner = f"""
-      <p><b>Ostatnia aktualizacja:</b> {esc(datetime.date.today().isoformat())}</p>
-      <h3 style="margin:18px 0 8px">Cookies</h3>
-      <ul>
-        <li>ArchiBot używa wyłącznie <b>niezbędnego</b> cookie sesyjnego do logowania i działania panelu.</li>
-        <li>Nie używamy śledzących cookies ani reklam.</li>
-      </ul>
-      <h3 style="margin:18px 0 8px">Jak zarządzać</h3>
-      <ul>
-        <li>Możesz usunąć cookies w ustawieniach przeglądarki.</li>
-      </ul>
-    """
-    return _legal_page("Cookies", "Polityka cookies", inner)
-
-
-@app.get("/contact", response_class=HTMLResponse)
-def contact():
-    inner = f"""
-      <p><b>Wsparcie:</b> {esc(BOT_EMAIL)}</p>
-      <p class="muted">Dla sprzedaży (must-have): dodaj tu nazwę firmy, adres, NIP oraz preferowany kanał kontaktu.</p>
-      <ul>
-        <li>W sprawach subskrypcji i faktur: panel firmy → „Zarządzaj subskrypcją”.</li>
-        <li>W sprawach technicznych: opisz problem i podaj email konta.</li>
-      </ul>
-    """
-    return _legal_page("Kontakt", "Kontakt", inner)
-
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page():
@@ -2268,6 +2307,7 @@ async def register(request: Request):
         "pricing_text": "",
         "billing": {"company_name": "", "nip": "", "address": "", "invoice_email": ""},
         "architects": [],
+        "reports": [],
         "usage": {"period": _period_key(), "forms_sent": 0},
         "stripe": {"status": "inactive", "customer_id": "", "subscription_id": ""},
         "plan": ("free" if ENABLE_FREE_PLAN else "none"),
@@ -2325,7 +2365,7 @@ def logout(request: Request):
 # =========================
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, tab: str = "overview"):
     gate = require_company(request)
     if gate:
         return gate
@@ -2333,141 +2373,355 @@ def dashboard(request: Request):
     company = get_company(request)
     assert company is not None
 
+    # Refresh usage window
+    _ensure_usage_period(company)
+    sent = int((company.get("usage") or {}).get("forms_sent") or 0)
+    remaining = _forms_remaining(company)
     plan = _company_plan(company)
     access_ok = subscription_active(company)
 
-    # usage
-    _ensure_usage_period(company)
-    sent = int((company.get("usage") or {}).get("forms_sent") or 0)
-    limit = _forms_limit(company)
-    remaining = max(0, limit - sent)
+    _ensure_reports(company)
+    architects = list(company.get("architects") or [])
+    reports = list(company.get("reports") or [])
+    reports.sort(key=lambda r: int(r.get("created_at") or 0), reverse=True)
 
-    st = (company.get("stripe") or {}).get("status") or "inactive"
-    stripe_msg = "Stripe niepodlaczony" if not stripe_ready() else f"Stripe: {st}"
+    allowed_tabs = {
+        "overview": "Start",
+        "reports": "Raporty",
+        "architects": "Architekci",
+        "pricing": "Cennik",
+        "billing": "Faktury",
+        "plan": "Plan / Subskrypcja",
+    }
+    tab = (tab or "overview").strip().lower()
+    if tab not in allowed_tabs:
+        tab = "overview"
 
-    customer_id = (company.get("stripe") or {}).get("customer_id") or ""
-    portal_btn = ""
-    if stripe_ready() and customer_id:
-        portal_btn = '<a class="btn" href="/billing/portal">Zarządzaj subskrypcją</a>'
+    def nav_item(key: str, label: str, badge: str = "") -> str:
+        cls = "navitem active" if key == tab else "navitem"
+        b = f'<span class="badge">{esc(badge)}</span>' if badge else ''
+        return f'<a class="{cls}" href="/dashboard?tab={esc(key)}"><span>{esc(label)}</span>{b}</a>'
 
+    # Sidebar
+    sidebar = f'''
+    <div class="panel side">
+      <div class="title">PANEL</div>
+      {nav_item("overview", "Start")}
+      {nav_item("reports", "Raporty", str(len(reports)) if reports else "")}
+      {nav_item("architects", "Architekci", str(len(architects)) if architects else "")}
+      {nav_item("pricing", "Cennik")}
+      {nav_item("billing", "Faktury")}
+      {nav_item("plan", "Plan / Subskrypcja")}
+      <div class="divider"></div>
+      <a class="navitem" href="/demo" target="_blank">Podgląd briefu</a>
+      <a class="navitem" href="/logout">Wyloguj</a>
+    </div>
+    '''
 
-    architects = company.get("architects", [])
-    arch_rows = []
-    for a in architects:
-        link = f"{BASE_URL}/f/{a['token']}"
-        arch_rows.append(f"""
-        <div class=\"tile\">
-          <div style=\"display:flex;justify-content:space-between;gap:10px;align-items:flex-start\">
-            <div>
-              <div style=\"font-weight:900\">{esc(a.get('name',''))}</div>
-              <div class=\"muted\">{esc(a.get('email',''))}</div>
-            </div>
-            <div style=\"display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end\">
-              <a class=\"btn\" href=\"{esc(link)}\" target=\"_blank\">Otworz formularz</a>
-              <a class=\"btn\" href=\"/dashboard/architect/delete?id={esc(a['id'])}\">Usun</a>
-            </div>
+    # Tab content
+    content = ""
+
+    if tab == "overview":
+        has_arch = len(architects) > 0
+        has_price = bool((company.get("pricing_text") or "").strip())
+        steps = [
+            ("Dodaj architekta", has_arch, "W panelu → Architekci"),
+            ("Wklej cennik (opcjonalnie)", has_price, "W panelu → Cennik"),
+            ("Aktywny plan", access_ok, "W panelu → Plan / Subskrypcja"),
+            ("Wyślij link do inwestora", has_arch and access_ok, "Skopiuj link z listy architektów"),
+        ]
+        done = sum(1 for _, ok, _ in steps if ok)
+        pct = int(round((done / len(steps)) * 100))
+
+        first_link = ""
+        if architects:
+            a0 = architects[0]
+            link = f"{BASE_URL}/f/{a0.get('token','')}"
+            first_link = f'''
+              <div class="panel card">
+                <div class="k">SZYBKA AKCJA</div>
+                <div class="n" style="font-size:18px;margin-top:8px">Link do briefu (1 klik do skopiowania)</div>
+                <div style="height:10px"></div>
+                <div class="notice mono" id="quickLink">{esc(link)}</div>
+                <div style="height:10px"></div>
+                <div class="actions">
+                  <button class="btn" data-copy="#quickLink">Kopiuj</button>
+                  <a class="btn gold" href="/dashboard?tab=architects">Zarządzaj architektami</a>
+                </div>
+              </div>
+            '''
+
+        status_badge = '<span class="badge ok">aktywny</span>' if access_ok else '<span class="badge bad">brak dostępu</span>'
+
+        content = f'''
+        <div class="headrow">
+          <div>
+            <h1 class="h1">Start</h1>
+            <p class="lead sub">Wszystko w zakładkach. Zero chaosu. Plan: <b>{esc(PLAN_LABELS.get(plan, plan))}</b> {status_badge}</p>
           </div>
-          <div style=\"height:8px\"></div>
-          <div class=\"muted\">Link do briefu:</div>
-          <div style=\"font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(238,242,255,0.85); word-break: break-all;\">
-            {esc(link)}
+          <div class="actions">
+            <a class="btn gold" href="/dashboard?tab=architects">Dodaj architekta</a>
+            <a class="btn" href="/dashboard?tab=plan">Zarządzaj planem</a>
           </div>
         </div>
-        """)
 
-    plan_label = PLAN_LABELS.get(plan, plan)
-    limit_label = f"{sent}/{limit}" if limit > 0 else "0/0"
-
-    free_action = ""
-    if ENABLE_FREE_PLAN and plan not in ("monthly", "yearly"):
-        free_action = "<a class=\"btn\" href=\"/dashboard/plan/free\">Aktywuj Beta 0 zł</a>"
-
-    body = f"""
-    <div class=\"wrap formwrap\">
-      <div style=\"display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap\">
-        <div>
-          <h1 style=\"margin:0 0 8px\">{esc(company.get('name'))}</h1>
-          <div class=\"muted\">Panel firmy • {badge('Dostęp aktywny' if access_ok else 'Dostęp zablokowany', access_ok)} • <b>Plan:</b> {esc(plan_label)} • {esc(stripe_msg)}</div>
+        <div class="grid3">
+          <div class="stat">
+            <div class="k">FORMULARZE</div>
+            <div class="n">{esc(str(sent))} / {esc(str(_forms_limit(company)))}</div>
+            <div class="t">Wysłane w tym miesiącu (UTC).</div>
+          </div>
+          <div class="stat">
+            <div class="k">POZOSTAŁO</div>
+            <div class="n">{esc(str(remaining))}</div>
+            <div class="t">Tyle briefów możesz jeszcze przyjąć.</div>
+          </div>
+          <div class="stat">
+            <div class="k">RAPORTY</div>
+            <div class="n">{esc(str(len(reports)))}</div>
+            <div class="t">Historia raportów w panelu.</div>
+          </div>
         </div>
-        <div style=\"display:flex;gap:10px;align-items:center;flex-wrap:wrap\">
-          <a class=\"btn\" href=\"/dashboard/reports\">Raporty</a>
-          <a class=\"btn\" href=\"/demo\">Podgląd briefu</a>
-          <a class=\"btn\" href=\"/logout\">Wyloguj</a>
+
+        <div style="height:14px"></div>
+
+        <div class="panel card">
+          <div class="k">ONBOARDING</div>
+          <div class="n" style="font-size:18px;margin-top:8px">Postęp konfiguracji: {pct}%</div>
+          <div class="divider"></div>
+          <div class="grid">
+            {''.join([f'<div class="notice" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><b>{esc(title)}</b><div class="muted" style="margin-top:4px">{esc(hint)}</div></div><div>{("✅" if ok else "—")}</div></div>' for title, ok, hint in steps])}
+          </div>
         </div>
-      </div>
 
-      <div style=\"height:18px\"></div>
+        <div style="height:14px"></div>
+        {first_link}
+        '''
 
-      <div class=\"grid3\" style=\"grid-template-columns: repeat(3, 1fr);\">
-        <div class=\"stat\"><div class=\"k\">PLAN</div><div class=\"n\">{esc(plan_label)}</div><div class=\"t\">{('Limit ' + str(limit) + ' / mies.') if limit else 'Wymaga aktywacji planu'}</div></div>
-        <div class=\"stat\"><div class=\"k\">ZUŻYCIE</div><div class=\"n\">{esc(limit_label)}</div><div class=\"t\">Pozostało: {remaining}</div></div>
-        <div class=\"stat\"><div class=\"k\">STATUS</div><div class=\"n\">{esc(st)}</div><div class=\"t\">Platnosci przez Stripe (opcjonalnie).</div></div>
-      </div>
+    elif tab == "architects":
+        # list architects
+        rows = []
+        for a in architects:
+            aid = str(a.get("id") or "")
+            name = str(a.get("name") or "")
+            email = str(a.get("email") or "")
+            token = str(a.get("token") or "")
+            link = f"{BASE_URL}/f/{token}"
+            rows.append(f'''
+              <tr>
+                <td><b>{esc(name)}</b><div class="muted">{esc(email)}</div></td>
+                <td>
+                  <div class="notice mono" id="l_{esc(aid)}">{esc(link)}</div>
+                  <div style="height:8px"></div>
+                  <div class="actions">
+                    <button class="btn" data-copy="#l_{esc(aid)}">Kopiuj</button>
+                    <a class="btn ghost" href="{esc(link)}" target="_blank">Otwórz</a>
+                    <a class="btn" href="/dashboard/architect/delete?id={esc(aid)}" onclick="return confirm('Usunąć architekta?')">Usuń</a>
+                  </div>
+                </td>
+              </tr>
+            ''')
+        if not rows:
+            rows_html = '<div class="notice">Brak architektów. Dodaj pierwszego — wtedy pojawi się link do briefu.</div>'
+        else:
+            rows_html = f'''
+              <table class="table">
+                <thead><tr><th>Architekt</th><th>Link do briefu</th></tr></thead>
+                <tbody>{''.join(rows)}</tbody>
+              </table>
+            '''
 
-      <div style=\"height:18px\"></div>
+        content = f'''
+        <div class="headrow">
+          <div>
+            <h1 class="h1">Architekci</h1>
+            <p class="lead sub">Każdy architekt dostaje własny link do formularza. Wysyłasz inwestorowi i czekasz na raport.</p>
+          </div>
+        </div>
 
-      <div class=\"grid3\" style=\"grid-template-columns: 1fr 1fr; align-items: start;\">
-        <div class=\"panel card\">
-          <h3 style=\"margin:0 0 10px\">Cennik firmy (dowolny tekst)</h3>
-          <p class=\"muted\" style=\"margin-top:0\">Wklej zasady wyceny (np. stawki za m2, pakiety, dodatki, minimalna kwota, etapy).</p>
-          <form method=\"post\" action=\"/dashboard/pricing\">
-            <div class=\"field\">
-              <label>Tresc cennika</label>
-              <textarea name=\"pricing_text\" placeholder=\"np. Koncepcja: ..., PB: ..., PW: ...\">{esc(company.get('pricing_text',''))}</textarea>
+        <div class="panel card">
+          <div class="k">DODAJ ARCHITEKTA</div>
+          <div style="height:10px"></div>
+          <form method="post" action="/dashboard/architect/add">
+            <div class="fields">
+              <div class="field"><label>Imię i nazwisko</label><input name="name" placeholder="np. Jan Kowalski"/></div>
+              <div class="field"><label>Email (na ten adres idzie raport)</label><input type="email" name="email" placeholder="jan@..."/></div>
             </div>
-            <div class=\"actions\"><button class=\"btn gold\" type=\"submit\">Zapisz cennik</button></div>
+            <div style="height:12px"></div>
+            <div class="actions">
+              <button class="btn gold" type="submit">Dodaj</button>
+              <a class="btn ghost" href="/demo" target="_blank">Zobacz brief</a>
+            </div>
           </form>
         </div>
 
-        <div class=\"panel card\">
-          <h3 style=\"margin:0 0 10px\">Dane do faktury (opcjonalnie)</h3>
-          <form method=\"post\" action=\"/dashboard/billing\">
-            <div class=\"fields\">
-              <div class=\"field\"><label>Nazwa firmy</label><input name=\"company_name\" value=\"{esc((company.get('billing') or {}).get('company_name',''))}\"/></div>
-              <div class=\"field\"><label>NIP</label><input name=\"nip\" value=\"{esc((company.get('billing') or {}).get('nip',''))}\"/></div>
-              <div class=\"field full\"><label>Adres</label><input name=\"address\" value=\"{esc((company.get('billing') or {}).get('address',''))}\"/></div>
-              <div class=\"field full\"><label>Email do faktur</label><input name=\"invoice_email\" value=\"{esc((company.get('billing') or {}).get('invoice_email',''))}\"/></div>
+        <div style="height:14px"></div>
+        {rows_html}
+        '''
+
+    elif tab == "pricing":
+        pt = (company.get("pricing_text") or "").strip()
+        content = f'''
+        <div class="headrow">
+          <div>
+            <h1 class="h1">Cennik</h1>
+            <p class="lead sub">Opcjonalnie. Jeśli wkleisz cennik, raport spróbuje podać widełki i logikę wyceny.</p>
+          </div>
+        </div>
+
+        <div class="panel card">
+          <form method="post" action="/dashboard/pricing">
+            <div class="field full">
+              <label>Tekst cennika</label>
+              <textarea name="pricing_text" placeholder="Wklej zasady wyceny (np. stawki / zakres / założenia)">{esc(pt)}</textarea>
+              <div class="muted" style="margin-top:8px">Tip: wrzuć format „pakiety + dopłaty + wyłączenia”.</div>
             </div>
-            <div class=\"actions\"><button class=\"btn gold\" type=\"submit\">Zapisz dane</button></div>
+            <div style="height:12px"></div>
+            <div class="actions">
+              <button class="btn gold" type="submit">Zapisz</button>
+            </div>
           </form>
         </div>
-      </div>
+        '''
 
-      <div style=\"height:18px\"></div>
-
-      <div class=\"panel card\">
-        <h3 style=\"margin:0 0 10px\">Architekci i linki do formularzy</h3>
-        <form method=\"post\" action=\"/dashboard/architect/add\">
-          <div class=\"fields\">
-            <div class=\"field\"><label>Imie / identyfikator</label><input name=\"name\" placeholder=\"np. Jan Kowalski\"/></div>
-            <div class=\"field\"><label>Email architekta (na raport)</label><input type=\"email\" name=\"email\" placeholder=\"jan@pracownia.pl\"/></div>
+    elif tab == "billing":
+        b = company.get("billing") or {}
+        content = f'''
+        <div class="headrow">
+          <div>
+            <h1 class="h1">Faktury</h1>
+            <p class="lead sub">Dane do faktury / rozliczeń. (Stripe może też pobierać te dane w swoim portalu.)</p>
           </div>
-          <div class=\"actions\"><button class=\"btn gold\" type=\"submit\">Dodaj architekta</button></div>
-        </form>
-
-        <div style=\"height:14px\"></div>
-        <div class=\"grid3\" style=\"grid-template-columns: 1fr; gap: 12px;\">
-          {''.join(arch_rows) if arch_rows else '<div class="muted">Brak architektow. Dodaj pierwszego powyzej.</div>'}
         </div>
-      </div>
 
-      <div style=\"height:18px\"></div>
+        <div class="panel card">
+          <form method="post" action="/dashboard/billing">
+            <div class="fields">
+              <div class="field"><label>Nazwa firmy</label><input name="company_name" value="{esc(str(b.get("company_name") or ""))}" placeholder="np. Pracownia XYZ Sp. z o.o."/></div>
+              <div class="field"><label>NIP</label><input name="nip" value="{esc(str(b.get("nip") or ""))}" placeholder="np. 1234567890"/></div>
+              <div class="field full"><label>Adres</label><input name="address" value="{esc(str(b.get("address") or ""))}" placeholder="ul. ..., miasto"/></div>
+              <div class="field full"><label>Email do faktur</label><input type="email" name="invoice_email" value="{esc(str(b.get("invoice_email") or ""))}" placeholder="np. faktury@..."/></div>
+            </div>
+            <div style="height:12px"></div>
+            <div class="actions">
+              <button class="btn gold" type="submit">Zapisz</button>
+            </div>
+          </form>
+        </div>
+        '''
 
-      <div class=\"panel card\">
-        <h3 style=\"margin:0 0 10px\">Plan i płatności</h3>
-        <div class=\"actions\">
-          {free_action}
-          {portal_btn}
-          <a class=\"btn\" href=\"/billing/checkout?plan=monthly\">Kup miesięczną (249 zł)</a>
-          <a class=\"btn\" href=\"/billing/checkout?plan=yearly\">Kup roczną (2 690 zł)</a>
-          <span class=\"muted\">Limit: <b>{limit}</b> formularzy / miesiąc • Anulowanie: 1 klik w panelu.</span>
+    elif tab == "reports":
+        def fmt(ts: int) -> str:
+            try:
+                return datetime.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M UTC")
+            except Exception:
+                return "-"
+
+        if reports:
+            rows = []
+            for r in reports:
+                rid = str(r.get("id") or "")
+                title = str(r.get("title") or "Raport")[:90]
+                arch = str(r.get("architect_name") or "")
+                ts = fmt(int(r.get("created_at") or 0))
+                sent_flag = bool(r.get("email_sent"))
+                pill = '<span class="pill ok">wysłany</span>' if sent_flag else '<span class="pill bad">niewysłany</span>'
+                rows.append(f'''
+                  <tr>
+                    <td><b>{esc(title)}</b><div class="muted">{esc(ts)}</div></td>
+                    <td><div class="muted">{esc(arch)}</div><div style="margin-top:6px">{pill}</div></td>
+                    <td>
+                      <div class="actions">
+                        <a class="btn" href="/dashboard/report/view?id={esc(rid)}">Podgląd</a>
+                        <a class="btn ghost" href="/dashboard/report/download?id={esc(rid)}">Pobierz .txt</a>
+                      </div>
+                    </td>
+                  </tr>
+                ''')
+            content = f'''
+            <div class="headrow">
+              <div>
+                <h1 class="h1">Raporty</h1>
+                <p class="lead sub">Historia ostatnich raportów (limit: {MAX_REPORTS_PER_COMPANY}).</p>
+              </div>
+              <div class="actions">
+                <a class="btn ghost" href="/report-demo" target="_blank">Zobacz demo</a>
+              </div>
+            </div>
+
+            <table class="table">
+              <thead><tr><th>Raport</th><th>Architekt</th><th>Akcje</th></tr></thead>
+              <tbody>{''.join(rows)}</tbody>
+            </table>
+            '''
+        else:
+            content = f'''
+            <div class="headrow">
+              <div>
+                <h1 class="h1">Raporty</h1>
+                <p class="lead sub">Tu będzie historia raportów po pierwszych wypełnieniach briefu.</p>
+              </div>
+            </div>
+            <div class="notice">Brak raportów. Dodaj architekta → wyślij link do inwestora → raport pojawi się tutaj.</div>
+            '''
+
+    elif tab == "plan":
+        stripe_status = str((company.get("stripe") or {}).get("status") or "inactive")
+        stripe_ready_flag = stripe_ready()
+        badge = '<span class="badge ok">Stripe OK</span>' if stripe_ready_flag else '<span class="badge bad">Stripe OFF</span>'
+        status_badge = '<span class="badge ok">dostęp aktywny</span>' if access_ok else '<span class="badge bad">brak dostępu</span>'
+
+        pay_actions = ""
+        if stripe_ready_flag:
+            pay_actions = f'''
+              <div class="actions">
+                <a class="btn gold" href="/stripe/checkout/monthly">Kup miesięczny</a>
+                <a class="btn" href="/stripe/checkout/yearly">Kup roczny</a>
+                <a class="btn ghost" href="/billing/portal">Zarządzaj subskrypcją</a>
+                <a class="btn ghost" href="/billing/portal">Anuluj subskrypcję</a>
+              </div>
+              <div class="muted" style="margin-top:10px">Uwaga: anulowanie/zmiana planu odbywa się w portalu Stripe.</div>
+            '''
+        else:
+            pay_actions = '<div class="notice">Stripe nie jest skonfigurowany na serwerze (brak kluczy ENV). Skontaktuj się z adminem wdrożenia.</div>'
+
+        content = f'''
+        <div class="headrow">
+          <div>
+            <h1 class="h1">Plan / Subskrypcja</h1>
+            <p class="lead sub">Plan: <b>{esc(PLAN_LABELS.get(plan, plan))}</b> {status_badge} • Stripe status: <b>{esc(stripe_status)}</b> {badge}</p>
+          </div>
+        </div>
+
+        <div class="panel card">
+          <div class="k">CO JEST W PLANIE</div>
+          <div class="divider"></div>
+          <div class="grid2">
+            <div class="notice">
+              <b>Limit miesięczny:</b> {esc(str(_forms_limit(company)))}<br/>
+              <span class="muted">Aktualnie wysłane: {esc(str(sent))} • Pozostało: {esc(str(remaining))}</span>
+            </div>
+            <div class="notice">
+              <b>Anulowanie subskrypcji:</b> w portalu Stripe.<br/>
+              <span class="muted">Przycisk jest poniżej (lub w menu po lewej).</span>
+            </div>
+          </div>
+          <div style="height:12px"></div>
+          {pay_actions}
+        </div>
+        '''
+
+    body = f'''
+    <div class="wrap">
+      <div class="dash">
+        {sidebar}
+        <div class="panel main card">
+          {content}
         </div>
       </div>
     </div>
-    """
-
-    return HTMLResponse(layout("Panel firmy", body=body, nav=nav_links()))
-
+    '''
+    return HTMLResponse(layout("Panel firmy", body=body, nav="", request=request, page="dash"))
 @app.get("/dashboard/plan/free")
 def dashboard_set_free_plan(request: Request):
     gate = require_company(request)
@@ -2505,7 +2759,7 @@ async def save_pricing(request: Request):
     cid = company["id"]
     db["companies"][cid]["pricing_text"] = pricing_text
     _save_db(db)
-    return RedirectResponse(url="/dashboard", status_code=302)
+    return RedirectResponse(url="/dashboard?tab=pricing", status_code=302)
 
 @app.post("/dashboard/billing")
 async def save_billing(request: Request):
@@ -2527,7 +2781,7 @@ async def save_billing(request: Request):
     cid = company["id"]
     db["companies"][cid]["billing"] = billing
     _save_db(db)
-    return RedirectResponse(url="/dashboard", status_code=302)
+    return RedirectResponse(url="/dashboard?tab=billing", status_code=302)
 
 @app.post("/dashboard/architect/add")
 async def add_architect(request: Request):
@@ -2542,7 +2796,7 @@ async def add_architect(request: Request):
     email = (form.get("email") or "").strip().lower()
 
     if not name or not email:
-        return RedirectResponse(url="/dashboard", status_code=302)
+        return RedirectResponse(url="/dashboard?tab=architects", status_code=302)
 
     db = _load_db()
     cid = company["id"]
@@ -2568,93 +2822,10 @@ def delete_architect(request: Request, id: str = ""):
     cid = company["id"]
     db["companies"][cid]["architects"] = [a for a in db["companies"][cid].get("architects", []) if a.get("id") != id]
     _save_db(db)
-    return RedirectResponse(url="/dashboard", status_code=302)
+    return RedirectResponse(url="/dashboard?tab=architects", status_code=302)
 
 
-
-# =========================
-# 12A) Raporty w panelu (historia)
-# =========================
-
-def _fmt_dt(ts: Any) -> str:
-    try:
-        return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return ""
-
-@app.get("/dashboard/reports", response_class=HTMLResponse)
-def dashboard_reports(request: Request):
-    gate = require_company(request)
-    if gate:
-        return gate
-    company = get_company(request)
-    assert company is not None
-
-    db = _load_db()
-    cid = company["id"]
-    c = db["companies"].get(cid) or {}
-    reports = c.get("reports") or []
-    if not isinstance(reports, list):
-        reports = []
-
-    rows = []
-    for r in reports:
-        rid = str(r.get("id") or "")
-        rows.append(f"""
-          <tr>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(_fmt_dt(r.get("created_at")))}</td>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("project") or "")}</td>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("investor") or "")}</td>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{esc(r.get("architect_name") or "")}</td>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">{badge("wysłano" if r.get("sent_email") else "nie", bool(r.get("sent_email")))}</td>
-            <td style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08); white-space:nowrap">
-              <a class="btn" href="/dashboard/report?id={esc(rid)}">Podgląd</a>
-              <a class="btn" href="/dashboard/report/download?id={esc(rid)}">Pobierz .txt</a>
-            </td>
-          </tr>
-        """)
-
-    if rows:
-        table_html = f"""
-        <div style="overflow:auto">
-          <table style="width:100%; border-collapse: collapse; font-size: 14px;">
-            <thead>
-              <tr style="text-align:left; color: rgba(238,242,255,0.75);">
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Data</th>
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Projekt</th>
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Inwestor</th>
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Architekt</th>
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Email</th>
-                <th style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.10);">Akcje</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows)}
-            </tbody>
-          </table>
-        </div>
-        """
-    else:
-        table_html = '<div class="muted">Brak raportów. Najpierw wyślij link do briefu do inwestora.</div>'
-
-    body = f"""
-    <div class="wrap formwrap">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-        <h1 style="margin:0">Raporty</h1>
-        <div class="actions" style="margin-top:0">
-          <a class="btn" href="/dashboard">Wróć do panelu</a>
-        </div>
-      </div>
-      <div style="height:12px"></div>
-
-      <div class="panel card">
-        {table_html}
-      </div>
-    </div>
-    """
-    return HTMLResponse(layout("Raporty", body=body, nav=nav_links()))
-
-@app.get("/dashboard/report", response_class=HTMLResponse)
+@app.get("/dashboard/report/view", response_class=HTMLResponse)
 def dashboard_report_view(request: Request, id: str = ""):
     gate = require_company(request)
     if gate:
@@ -2662,36 +2833,40 @@ def dashboard_report_view(request: Request, id: str = ""):
     company = get_company(request)
     assert company is not None
 
-    db = _load_db()
-    cid = company["id"]
-    c = db["companies"].get(cid) or {}
-    reports = c.get("reports") or []
-    if not isinstance(reports, list):
-        reports = []
-    rep = next((r for r in reports if str(r.get("id") or "") == id), None)
+    _ensure_reports(company)
+    rep = None
+    for r in company.get("reports") or []:
+        if str(r.get("id") or "") == str(id or ""):
+            rep = r
+            break
+
     if not rep:
-        return RedirectResponse(url="/dashboard/reports", status_code=302)
+        body = flash_html("Nie znaleziono raportu.") + '<div class="wrap formwrap"><a class="btn" href="/dashboard?tab=reports">Wróć</a></div>'
+        return HTMLResponse(layout("Raport", body=body, request=request, page="dash"))
 
-    report_text = rep.get("report") or ""
+    title = str(rep.get("title") or "Raport")
+    text = str(rep.get("report") or "")
+    meta_arch = str(rep.get("architect_name") or "")
 
-    body = f"""
+    body = f'''
     <div class="wrap formwrap">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-        <h1 style="margin:0 0 6px">Raport</h1>
-        <div class="actions" style="margin-top:0">
-          <a class="btn" href="/dashboard/reports">Lista raportów</a>
-          <a class="btn" href="/dashboard/report/download?id={esc(id)}">Pobierz .txt</a>
+      <div class="headrow">
+        <div>
+          <h1 class="h1" style="margin:0">{esc(title)}</h1>
+          <p class="lead sub">Architekt: <b>{esc(meta_arch)}</b> • Raport zapisany w historii.</p>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/dashboard?tab=reports">Wróć</a>
+          <a class="btn ghost" href="/dashboard/report/download?id={esc(str(id))}">Pobierz .txt</a>
+          <button class="btn" data-copy="#repText">Kopiuj</button>
         </div>
       </div>
-      <div class="muted">Projekt: <b>{esc(rep.get("project") or "")}</b> • Inwestor: <b>{esc(rep.get("investor") or "")}</b> • {esc(_fmt_dt(rep.get("created_at")))}</div>
-
-      <div style="height:12px"></div>
-      <div class="panel card" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">
-{esc(report_text)}
+      <div class="panel card">
+        <div class="codebox" id="repText">{esc(text)}</div>
       </div>
     </div>
-    """
-    return HTMLResponse(layout("Raport", body=body, nav=nav_links()))
+    '''
+    return HTMLResponse(layout("Raport", body=body, request=request, page="dash"))
 
 @app.get("/dashboard/report/download")
 def dashboard_report_download(request: Request, id: str = ""):
@@ -2701,19 +2876,76 @@ def dashboard_report_download(request: Request, id: str = ""):
     company = get_company(request)
     assert company is not None
 
-    db = _load_db()
-    cid = company["id"]
-    c = db["companies"].get(cid) or {}
-    reports = c.get("reports") or []
-    if not isinstance(reports, list):
-        reports = []
-    rep = next((r for r in reports if str(r.get("id") or "") == id), None)
+    _ensure_reports(company)
+    rep = None
+    for r in company.get("reports") or []:
+        if str(r.get("id") or "") == str(id or ""):
+            rep = r
+            break
     if not rep:
-        return RedirectResponse(url="/dashboard/reports", status_code=302)
+        return PlainTextResponse("Not found", status_code=404)
 
-    text = rep.get("report") or ""
-    fname = f"archibot-report-{id}.txt"
-    return PlainTextResponse(text, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    title = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(rep.get("title") or "report"))[:50].strip("_") or "report"
+    fname = f"archibot_{title}_{id}.txt"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return PlainTextResponse(str(rep.get("report") or ""), headers=headers)
+
+@app.get("/billing/portal")
+def billing_portal(request: Request):
+    gate = require_company(request)
+    if gate:
+        return gate
+
+    if not stripe_ready():
+        return RedirectResponse(url="/dashboard?tab=plan", status_code=302)
+
+    stripe_init()
+
+    db = _load_db()
+    company = get_company(request)
+    assert company is not None
+    cid = company["id"]
+
+    c = db["companies"].get(cid) or company
+    stripe_meta = c.get("stripe") or {}
+    customer_id = str(stripe_meta.get("customer_id") or "").strip()
+    subscription_id = str(stripe_meta.get("subscription_id") or "").strip()
+
+    # Spróbuj odtworzyć customer_id jeśli brakuje
+    if (not customer_id) and subscription_id:
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+            customer_id = str(sub.get("customer") or "").strip()
+        except Exception:
+            customer_id = ""
+
+    if (not customer_id) and c.get("email"):
+        try:
+            res = stripe.Customer.list(email=str(c.get("email") or "").strip(), limit=1)
+            if getattr(res, "data", None):
+                customer_id = str(res.data[0].id)
+        except Exception:
+            customer_id = ""
+
+    if not customer_id:
+        # Bez customer_id nie utworzymy sesji portalu — wróć z komunikatem
+        return RedirectResponse(url="/dashboard?tab=plan", status_code=302)
+
+    # Zapisz customer_id w bazie dla przyszłych wejść
+    db["companies"][cid].setdefault("stripe", {})
+    db["companies"][cid]["stripe"]["customer_id"] = customer_id
+    _save_db(db)
+
+    try:
+        portal = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{BASE_URL}/dashboard?tab=plan",
+        )
+        return RedirectResponse(url=portal.url, status_code=303)
+    except Exception as e:
+        print(f"[STRIPE] billing_portal failed customer_id={customer_id} err={type(e).__name__}: {e}")
+        return RedirectResponse(url="/dashboard?tab=plan", status_code=302)
+
 
 
 # =========================
@@ -2992,6 +3224,110 @@ franekstenzel@gmail.com
 
 
 # =========================
+# 13B) Podgląd raportu + strony prawne
+# =========================
+
+@app.get("/report-demo", response_class=HTMLResponse)
+def report_demo(request: Request):
+    sample = """PODSUMOWANIE (fragment)
+
+Cel: przygotować halę magazynowo-produkcyjną pod logistykę (24/7).
+Status danych: część informacji brakująca — poniżej lista pytań i dokumentów.
+
+P0 — BLOKERY (bez tego nie wycenisz rzetelnie)
+1) Wymogi PPOŻ: tryskacze / hydranty / klasy odporności / scenariusz pożarowy?
+2) Parametry procesu: obciążenia posadzki, wysokość składowania, suwnice / wózki, strefy EX?
+3) Media: moce przyłączeniowe, woda ppoż., ścieki technologiczne, gaz, sprężone powietrze?
+4) Formalno-prawne: MPZP/WZ, decyzja środowiskowa (OOŚ) — czy wymagana?
+
+P1 — DO DOPRECYZOWANIA (wpływa na zakres)
+• Etapowanie inwestycji, harmonogram, okna przestojów.
+• Standard biur / socjal / BMS / monitoring / kontrola dostępu.
+• Warunki dostaw: doki, rampy, place manewrowe, promienie skrętu.
+
+DOKUMENTY (prośba do inwestora)
+• MPZP/WZ, mapa do celów projektowych, warunki przyłączy (energia / woda / kanalizacja).
+• Badania geotechniczne / nośność gruntu.
+• Opis procesu/technologii + wymagania BHP/PPOŻ.
+
+GOTOWA WIADOMOŚĆ DO KLIENTA (copy/paste)
+Dzień dobry, aby przygotować rzetelną wycenę projektu prosimy o uzupełnienie: (1) ... (2) ...
+W załączeniu lista pytań P0/P1 oraz dokumentów. Po otrzymaniu danych wracamy z wyceną w terminie ..."""
+
+    body = f'''
+    <div class="wrap formwrap">
+      <div class="headrow">
+        <div>
+          <h1 class="h1" style="margin:0">Raport demo</h1>
+          <p class="lead sub">To jest przykładowy fragment. W produkcji: raport idzie na mail architekta i zapisuje się w historii w panelu.</p>
+        </div>
+        <div class="actions">
+          <a class="btn gold" href="/register">Załóż konto</a>
+          <a class="btn" href="/demo">Podgląd briefu</a>
+          <a class="btn ghost" href="/">Strona główna</a>
+        </div>
+      </div>
+
+      <div class="panel card">
+        <div class="actions" style="justify-content:flex-end">
+          <button class="btn" data-copy="#demoReport">Kopiuj</button>
+        </div>
+        <div class="divider"></div>
+        <div class="codebox" id="demoReport">{esc(sample)}</div>
+      </div>
+    </div>
+    '''
+    return HTMLResponse(layout("Raport demo", body=body, nav=nav_links(), request=request))
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms(request: Request):
+    body = '''
+    <div class="wrap formwrap">
+      <h1 class="h1" style="margin:0 0 10px">Regulamin</h1>
+      <div class="panel card">
+        <div class="muted">Minimalna wersja (do uzupełnienia):</div>
+        <div style="height:10px"></div>
+        <div class="muted">1) Usługa: generowanie raportów na podstawie briefu inwestora.</div>
+        <div class="muted">2) Odpowiedzialność: raport to wsparcie, nie porada prawna/projektowa.</div>
+        <div class="muted">3) Subskrypcje: płatności i anulowanie przez portal Stripe.</div>
+        <div class="muted">4) Kontakt: e-mail z panelu / dane firmy.</div>
+      </div>
+    </div>
+    '''
+    return HTMLResponse(layout("Regulamin", body=body, nav=nav_links(), request=request))
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy(request: Request):
+    body = '''
+    <div class="wrap formwrap">
+      <h1 class="h1" style="margin:0 0 10px">Polityka prywatności</h1>
+      <div class="panel card">
+        <div class="muted">Minimalna wersja (do uzupełnienia):</div>
+        <div style="height:10px"></div>
+        <div class="muted">• Przechowujemy dane konta firmy oraz treść raportów w bazie JSON (serwer).</div>
+        <div class="muted">• Dane z briefu są używane do wygenerowania raportu i wysyłki na e-mail architekta.</div>
+        <div class="muted">• Płatności obsługuje Stripe (portal subskrypcji).</div>
+      </div>
+    </div>
+    '''
+    return HTMLResponse(layout("Prywatność", body=body, nav=nav_links(), request=request))
+
+@app.get("/security", response_class=HTMLResponse)
+def security(request: Request):
+    body = '''
+    <div class="wrap formwrap">
+      <h1 class="h1" style="margin:0 0 10px">Bezpieczeństwo</h1>
+      <div class="panel card">
+        <div class="muted">• Hasła są haszowane (PBKDF2).</div>
+        <div class="muted">• Sesje po HTTPS (jeśli BASE_URL ma https).</div>
+        <div class="muted">• Link do briefu jest unikalny dla architekta.</div>
+      </div>
+    </div>
+    '''
+    return HTMLResponse(layout("Bezpieczeństwo", body=body, nav=nav_links(), request=request))
+
+
+# =========================
 # 14) Formularz firmowy /f/{token}
 # =========================
 
@@ -3094,24 +3430,20 @@ async def submit_form(token: str, request: Request):
     else:
         print(f"[EMAIL] FAIL delivery_id={delivery_id} reason=architect has no email in DB")
 
-    # Zapis raportu w panelu (ostatnie N)
+    # Zapis raportu do historii (panel firmy)
     try:
-        record = {
-            "id": _new_id("rep"),
-            "created_at": _now_ts(),
-            "architect_name": architect.get("name", ""),
-            "architect_email": architect.get("email", ""),
-            "project": form_clean.get("investment_name") or "",
-            "investor": form_clean.get("investor_company") or "",
-            "sent_email": bool(sent),
-            "delivery_id": delivery_id,
-            "report": report,
-        }
-        _add_report(db, company_id, record)
+        _store_report(
+            db,
+            company_id,
+            report_text=report,
+            form_clean=form_clean,
+            architect=architect,
+            delivery_id=delivery_id,
+            email_sent=sent,
+        )
         _save_db(db)
     except Exception as e:
-        print(f"[REPORT] store error: {type(e).__name__}: {e}")
-
+        print(f"[REPORT] store failed company_id={company_id} err={type(e).__name__}: {e}")
 
     # Komunikat dla inwestora – profesjonalny, neutralny, bez odsyłania do logów
     body = """
@@ -3160,37 +3492,6 @@ def billing_checkout(request: Request, plan: str = "monthly"):
         return RedirectResponse(url=session.url, status_code=303)  # type: ignore
     except Exception as e:
         print(f"[STRIPE] checkout error: {type(e).__name__}: {e}")
-        return RedirectResponse(url="/dashboard", status_code=302)
-
-
-
-@app.get("/billing/portal")
-def billing_portal(request: Request):
-    """Stripe Customer Portal: anulowanie, faktury, zmiana karty. Must-have pod sprzedaż."""
-    gate = require_company(request)
-    if gate:
-        return gate
-    company = get_company(request)
-    assert company is not None
-
-    if not stripe_ready():
-        return RedirectResponse(url="/dashboard", status_code=302)
-
-    stripe_init()
-
-    customer_id = (company.get("stripe") or {}).get("customer_id") or ""
-    if not customer_id:
-        # brak customer_id: użytkownik nie ma jeszcze płatnej subskrypcji
-        return RedirectResponse(url="/dashboard", status_code=302)
-
-    try:
-        session = stripe.billing_portal.Session.create(  # type: ignore
-            customer=customer_id,
-            return_url=f"{BASE_URL}/dashboard",
-        )
-        return RedirectResponse(url=session.url, status_code=303)  # type: ignore
-    except Exception as e:
-        print(f"[STRIPE] portal error: {type(e).__name__}: {e}")
         return RedirectResponse(url="/dashboard", status_code=302)
 
 @app.post("/stripe/webhook")
